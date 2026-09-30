@@ -23,9 +23,13 @@ export class VoiceRecognizer {
   private callbacks: SpeechRecognitionCallbacks;
   private language: string = "en-IN"; // Prefer Indian English
 
-  // Silence auto-finalizer & transcript state
+  // Turn-taking speech buffer & silence detector
+  // Ensures ARIA listens to the customer's full thought/sentence before replying
   private silenceTimer: NodeJS.Timeout | null = null;
-  private pendingInterimTranscript: string = "";
+  private silenceTimeoutMs: number = 1800; // Wait 1.8s of silence before concluding customer finished speaking
+  private priorSessionsFinal: string = "";
+  private currentSessionFinal: string = "";
+  private currentSessionInterim: string = "";
   private hasDispatchedUtterance: boolean = false;
 
   constructor(callbacks: SpeechRecognitionCallbacks) {
@@ -66,6 +70,13 @@ export class VoiceRecognizer {
     this.shouldKeepListening = true;
     this.isPausedForTTS = false;
     this.hasDispatchedUtterance = false;
+    this.priorSessionsFinal = "";
+    this.currentSessionFinal = "";
+    this.currentSessionInterim = "";
+    if (this.silenceTimer) {
+      clearTimeout(this.silenceTimer);
+      this.silenceTimer = null;
+    }
 
     try {
       if (this.recognition) {
@@ -97,62 +108,52 @@ export class VoiceRecognizer {
           return;
         }
 
-        let interimTranscript = "";
-        let finalTranscript = "";
+        let sessionFinal = "";
+        let sessionInterim = "";
 
-        for (let i = event.resultIndex; i < event.results.length; ++i) {
+        // Read all results in the current recognition session
+        for (let i = 0; i < event.results.length; ++i) {
           const item = event.results[i];
           const text = item[0]?.transcript || "";
           if (item.isFinal) {
-            finalTranscript += text;
+            sessionFinal += " " + text;
           } else {
-            interimTranscript += text;
+            sessionInterim += " " + text;
           }
         }
 
-        // If browser provided final transcript, dispatch immediately
-        if (finalTranscript.trim()) {
-          if (this.silenceTimer) {
-            clearTimeout(this.silenceTimer);
-            this.silenceTimer = null;
-          }
-          this.pendingInterimTranscript = "";
-          this.hasDispatchedUtterance = true;
-          console.log(`%c[STAGE: FINAL_TRANSCRIPT] "${finalTranscript.trim()}"`, "color: #059669; font-weight: bold;");
-          this.callbacks.onResult?.(finalTranscript.trim(), true);
+        this.currentSessionFinal = sessionFinal.trim();
+        this.currentSessionInterim = sessionInterim.trim();
+
+        // Combine any prior sessions with current session for the full live thought
+        const fullSpokenText = [
+          this.priorSessionsFinal,
+          this.currentSessionFinal,
+          this.currentSessionInterim,
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .trim();
+
+        if (!fullSpokenText) {
           return;
         }
 
-        // Handle interim partial transcript
-        if (interimTranscript.trim()) {
-          this.pendingInterimTranscript = interimTranscript.trim();
-          this.hasDispatchedUtterance = false;
-          console.log(`[STAGE: PARTIAL_TRANSCRIPT] "${interimTranscript.trim()}"`);
-          this.callbacks.onResult?.(interimTranscript.trim(), false);
+        this.hasDispatchedUtterance = false;
 
-          // Reset silence timer: if user stops speaking for 1200ms, auto-commit as final
-          if (this.silenceTimer) {
-            clearTimeout(this.silenceTimer);
-          }
+        // Provide real-time live transcript to UI while customer is still speaking
+        this.callbacks.onResult?.(fullSpokenText, false);
 
-          this.silenceTimer = setTimeout(() => {
-            if (
-              this.pendingInterimTranscript.trim() &&
-              !this.hasDispatchedUtterance &&
-              !this.isPausedForTTS &&
-              this.shouldKeepListening
-            ) {
-              const textToCommit = this.pendingInterimTranscript.trim();
-              console.log(
-                `%c[STAGE: FINAL_TRANSCRIPT (Silence Detected)] "${textToCommit}"`,
-                "color: #059669; font-weight: bold;"
-              );
-              this.pendingInterimTranscript = "";
-              this.hasDispatchedUtterance = true;
-              this.callbacks.onResult?.(textToCommit, true);
-            }
-          }, 1200);
+        // Reset silence timer: ARIA patiently waits 1.8s after the customer pauses
+        // before concluding the sentence is complete and dispatching to AI
+        if (this.silenceTimer) {
+          clearTimeout(this.silenceTimer);
+          this.silenceTimer = null;
         }
+
+        this.silenceTimer = setTimeout(() => {
+          this.dispatchFinalUtterance("Silence Detected (1.8s)");
+        }, this.silenceTimeoutMs);
       };
 
       this.recognition.onerror = (event: any) => {
@@ -199,21 +200,20 @@ export class VoiceRecognizer {
         this.isListening = false;
         this.isStarting = false;
 
-        // If recognizer ended while there was pending interim speech not yet dispatched, dispatch it!
-        if (
-          this.pendingInterimTranscript.trim() &&
-          !this.hasDispatchedUtterance &&
-          !this.isPausedForTTS &&
-          this.shouldKeepListening
-        ) {
-          const textToCommit = this.pendingInterimTranscript.trim();
-          console.log(
-            `%c[STAGE: FINAL_TRANSCRIPT (Stream End)] "${textToCommit}"`,
-            "color: #059669; font-weight: bold;"
-          );
-          this.pendingInterimTranscript = "";
-          this.hasDispatchedUtterance = true;
-          this.callbacks.onResult?.(textToCommit, true);
+        // Preserve any pending speech from this session across recognizer restarts
+        if (this.currentSessionFinal || this.currentSessionInterim) {
+          const sessionText = [this.currentSessionFinal, this.currentSessionInterim]
+            .filter(Boolean)
+            .join(" ")
+            .trim();
+          if (sessionText) {
+            this.priorSessionsFinal = [this.priorSessionsFinal, sessionText]
+              .filter(Boolean)
+              .join(" ")
+              .trim();
+            this.currentSessionFinal = "";
+            this.currentSessionInterim = "";
+          }
         }
 
         // Auto-restart loop if user is still on active call and not paused for TTS
@@ -228,6 +228,10 @@ export class VoiceRecognizer {
             }
           }, 150);
         } else {
+          // If stopping completely and speech was buffered, commit it
+          if (this.priorSessionsFinal && !this.hasDispatchedUtterance) {
+            this.dispatchFinalUtterance("Stream Stopped");
+          }
           this.callbacks.onEnd?.();
         }
       };
@@ -254,22 +258,51 @@ export class VoiceRecognizer {
   }
 
   /**
-   * Manually commit any currently spoken interim transcript immediately
+   * Commit the buffered utterance as final once customer has completely finished speaking
    */
-  public commitCurrentTranscript(): string | null {
+  private dispatchFinalUtterance(reason: string = "Silence Detected"): string | null {
     if (this.silenceTimer) {
       clearTimeout(this.silenceTimer);
       this.silenceTimer = null;
     }
-    if (this.pendingInterimTranscript.trim() && !this.hasDispatchedUtterance) {
-      const text = this.pendingInterimTranscript.trim();
-      this.pendingInterimTranscript = "";
-      this.hasDispatchedUtterance = true;
-      console.log(`%c[STAGE: FINAL_TRANSCRIPT (Manual Commit)] "${text}"`, "color: #059669; font-weight: bold;");
-      this.callbacks.onResult?.(text, true);
-      return text;
+
+    if (this.hasDispatchedUtterance || this.isPausedForTTS) {
+      return null;
     }
-    return null;
+
+    const fullUtterance = [
+      this.priorSessionsFinal,
+      this.currentSessionFinal,
+      this.currentSessionInterim,
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .trim();
+
+    if (!fullUtterance) {
+      return null;
+    }
+
+    // Mark as dispatched and clear buffer
+    this.hasDispatchedUtterance = true;
+    this.priorSessionsFinal = "";
+    this.currentSessionFinal = "";
+    this.currentSessionInterim = "";
+
+    console.log(
+      `%c[STAGE: FINAL_TRANSCRIPT (${reason})] "${fullUtterance}"`,
+      "color: #059669; font-weight: bold;"
+    );
+
+    this.callbacks.onResult?.(fullUtterance, true);
+    return fullUtterance;
+  }
+
+  /**
+   * Manually commit any currently spoken transcript immediately (e.g. user clicks "Send Now")
+   */
+  public commitCurrentTranscript(): string | null {
+    return this.dispatchFinalUtterance("Manual Commit / Send Now");
   }
 
   /**
@@ -281,7 +314,9 @@ export class VoiceRecognizer {
       clearTimeout(this.silenceTimer);
       this.silenceTimer = null;
     }
-    this.pendingInterimTranscript = "";
+    this.priorSessionsFinal = "";
+    this.currentSessionFinal = "";
+    this.currentSessionInterim = "";
     this.hasDispatchedUtterance = false;
 
     if (this.recognition && this.isListening) {
@@ -298,7 +333,9 @@ export class VoiceRecognizer {
   public resumeAfterTTS() {
     this.isPausedForTTS = false;
     this.shouldKeepListening = true;
-    this.pendingInterimTranscript = "";
+    this.priorSessionsFinal = "";
+    this.currentSessionFinal = "";
+    this.currentSessionInterim = "";
     this.hasDispatchedUtterance = false;
 
     if (!this.isListening && !this.isStarting) {
@@ -314,7 +351,9 @@ export class VoiceRecognizer {
       clearTimeout(this.silenceTimer);
       this.silenceTimer = null;
     }
-    this.pendingInterimTranscript = "";
+    this.priorSessionsFinal = "";
+    this.currentSessionFinal = "";
+    this.currentSessionInterim = "";
     this.hasDispatchedUtterance = false;
 
     if (this.recognition) {

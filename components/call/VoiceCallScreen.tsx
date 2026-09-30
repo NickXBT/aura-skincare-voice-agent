@@ -14,13 +14,9 @@ import {
   Sparkles,
   ChevronDown,
   ChevronUp,
-  Copy,
-  Check,
   ArrowLeft,
   MessageSquare,
   AlertCircle,
-  Activity,
-  Terminal,
   Send,
 } from "lucide-react";
 import { AgentState } from "@/components/VoiceVisualizer";
@@ -79,10 +75,7 @@ export const VoiceCallScreen: React.FC<VoiceCallScreenProps> = ({
   const [isMuted, setIsMuted] = useState(false);
   const [isSpeakerMuted, setIsSpeakerMuted] = useState(false);
   const [showTranscript, setShowTranscript] = useState(true);
-  const [showDiagnostics, setShowDiagnostics] = useState(false);
   const [callDuration, setCallDuration] = useState(0);
-  const [showJsonDetails, setShowJsonDetails] = useState(false);
-  const [copiedJson, setCopiedJson] = useState(false);
   const [textInput, setTextInput] = useState("");
 
   const transcriptScrollRef = useRef<HTMLDivElement | null>(null);
@@ -116,15 +109,7 @@ export const VoiceCallScreen: React.FC<VoiceCallScreenProps> = ({
 
   // Filter messages to user & assistant
   const displayMessages = messages.filter((m) => m.role === "user" || m.role === "assistant");
-  const latestMessage = displayMessages[displayMessages.length - 1];
 
-  // Copy JSON handler
-  const handleCopyJson = () => {
-    if (!postCallReport) return;
-    navigator.clipboard.writeText(JSON.stringify(postCallReport, null, 2));
-    setCopiedJson(true);
-    setTimeout(() => setCopiedJson(false), 2000);
-  };
 
   return (
     <div className="min-h-screen bg-[#FAF9FB] text-[#17131A] flex flex-col justify-between selection:bg-[#F0EAF4] selection:text-[#4B2859]">
@@ -152,19 +137,6 @@ export const VoiceCallScreen: React.FC<VoiceCallScreenProps> = ({
 
         {/* Live Call Duration / Status Pill & Diagnostic toggle */}
         <div className="flex items-center gap-2">
-          {/* Diagnostics toggle */}
-          <button
-            onClick={() => setShowDiagnostics(!showDiagnostics)}
-            className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-mono font-medium border transition-colors cursor-pointer ${
-              showDiagnostics
-                ? "bg-[#4B2859] text-white border-[#4B2859]"
-                : "bg-white text-[#716A77] hover:text-[#17131A] border-[#E9E5EB]"
-            }`}
-            title="Toggle Audio Diagnostics Panel"
-          >
-            <Activity className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Diagnostics</span>
-          </button>
 
           {isCallActive ? (
             <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-mono font-medium shadow-2xs">
@@ -188,50 +160,6 @@ export const VoiceCallScreen: React.FC<VoiceCallScreenProps> = ({
         </div>
       </header>
 
-      {/* Developer Diagnostics Panel (Collapsible) */}
-      <AnimatePresence>
-        {showDiagnostics && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            className="overflow-hidden bg-[#17131A] text-white border-b border-zinc-800 text-xs font-mono px-6 py-3"
-          >
-            <div className="max-w-3xl mx-auto flex flex-wrap items-center justify-between gap-y-2 gap-x-6 text-[11px]">
-              <div className="flex items-center gap-1.5">
-                <span className="text-zinc-400">Microphone:</span>
-                <span className={diagnosticInfo?.micStatus.includes("Connected") ? "text-emerald-400 font-bold" : "text-amber-400"}>
-                  {diagnosticInfo?.micStatus || "Checking…"}
-                </span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <span className="text-zinc-400">Permission:</span>
-                <span className={diagnosticInfo?.permissionStatus === "Granted" ? "text-emerald-400 font-bold" : "text-rose-400"}>
-                  {diagnosticInfo?.permissionStatus || "Pending"}
-                </span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <span className="text-zinc-400">Speech Recognition:</span>
-                <span className={diagnosticInfo?.sttStatus.includes("Active") ? "text-emerald-400 font-bold" : "text-zinc-300"}>
-                  {diagnosticInfo?.sttStatus || "Idle"}
-                </span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <span className="text-zinc-400">TTS Audio:</span>
-                <span className={diagnosticInfo?.ttsStatus.includes("Speaking") ? "text-purple-300 font-bold" : "text-emerald-400"}>
-                  {diagnosticInfo?.ttsStatus || "Ready"}
-                </span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <span className="text-zinc-400">State:</span>
-                <span className="px-2 py-0.5 rounded bg-zinc-800 text-white font-bold uppercase">
-                  {agentState}
-                </span>
-              </div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
 
       {/* 2. Main Viewport */}
       <main className="flex-1 max-w-3xl w-full mx-auto px-6 py-6 sm:py-8 flex flex-col items-center justify-center text-center">
@@ -319,47 +247,6 @@ export const VoiceCallScreen: React.FC<VoiceCallScreenProps> = ({
                       <p className="text-[#17131A] leading-relaxed">{m.content}</p>
                     </div>
                   ))}
-                </div>
-              )}
-            </div>
-
-            {/* Accordion 2: Structured JSON Data */}
-            <div className="bg-white rounded-2xl border border-[#E9E5EB] overflow-hidden">
-              <button
-                onClick={() => setShowJsonDetails(!showJsonDetails)}
-                className="w-full px-5 py-3.5 flex items-center justify-between text-left hover:bg-[#FAF9FB] transition-colors cursor-pointer"
-              >
-                <span className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-[#17131A]">
-                  <Sparkles className="w-3.5 h-3.5 text-[#4B2859]" />
-                  Structured Evaluation JSON
-                </span>
-                {showJsonDetails ? <ChevronUp className="w-4 h-4 text-[#716A77]" /> : <ChevronDown className="w-4 h-4 text-[#716A77]" />}
-              </button>
-
-              {showJsonDetails && (
-                <div className="p-4 border-t border-[#E9E5EB] bg-[#FAF9FB] space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[11px] text-[#716A77]">Schema Output:</span>
-                    <button
-                      onClick={handleCopyJson}
-                      className="flex items-center gap-1 text-[11px] text-[#4B2859] hover:underline"
-                    >
-                      {copiedJson ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
-                      <span>{copiedJson ? "Copied" : "Copy JSON"}</span>
-                    </button>
-                  </div>
-                  <pre className="p-3 bg-white rounded-xl border border-[#E9E5EB] font-mono text-[10px] text-[#17131A] overflow-x-auto leading-relaxed">
-                    {JSON.stringify(
-                      {
-                        customer_intent: postCallReport.outcome.customer_intent,
-                        order_id: postCallReport.outcome.order_id || "None",
-                        resolution_status: postCallReport.outcome.resolution_status,
-                        call_summary: postCallReport.outcome.call_summary,
-                      },
-                      null,
-                      2
-                    )}
-                  </pre>
                 </div>
               )}
             </div>
