@@ -479,6 +479,8 @@ export default function Home() {
           interimTranscript={liveInterimTranscript}
           diagnosticInfo={diagnosticInfo}
           ttsWarningMessage={ttsWarningMessage}
+          onCommitInterim={() => recognizerRef.current?.commitCurrentTranscript()}
+          onSendMessage={(text) => handleSendMessage(text, true)}
         />
       ) : (
         <ChatScreen

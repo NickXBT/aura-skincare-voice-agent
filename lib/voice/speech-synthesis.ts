@@ -83,14 +83,6 @@ export class VoiceSynthesizer {
       return;
     }
 
-    // Cancel any ongoing audio and clear watchdog
-    this.cancel();
-
-    // Reload voices in case browser populated them lazily
-    if (this.voices.length === 0) {
-      this.loadVoices();
-    }
-
     // Clean text of markdown formatting, emojis, and asterisks for natural voice delivery
     const cleanText = text
       .replace(/[*#_`~[\]]/g, "")
@@ -103,15 +95,36 @@ export class VoiceSynthesizer {
       return;
     }
 
+    // In Chromium, calling synth.cancel() and synth.speak() synchronously can cancel the new utterance.
+    // If currently speaking, cancel and wait 60ms for the browser audio thread to clear before speaking.
+    if (this.synth.speaking || this.synth.pending || this.isSpeaking) {
+      this.cancel();
+      setTimeout(() => {
+        this.executeSpeak(cleanText);
+      }, 60);
+      return;
+    }
+
+    this.executeSpeak(cleanText);
+  }
+
+  private executeSpeak(cleanText: string) {
+    if (!this.synth) return;
+
+    // Reload voices in case browser populated them lazily
+    if (this.voices.length === 0) {
+      this.loadVoices();
+    }
+
     console.log(`%c[STAGE: TTS_STARTED] Speaking: "${cleanText.slice(0, 60)}..."`, "color: #7c3aed; font-weight: bold;");
 
     try {
       const utterance = new SpeechSynthesisUtterance(cleanText);
       if (this.selectedVoice) {
         utterance.voice = this.selectedVoice;
-        utterance.lang = this.selectedVoice.lang || "en-IN";
+        utterance.lang = this.selectedVoice.lang;
       } else {
-        utterance.lang = "en-IN";
+        utterance.lang = typeof navigator !== "undefined" && navigator.language ? navigator.language : "en-US";
       }
       
       utterance.rate = 1.0;

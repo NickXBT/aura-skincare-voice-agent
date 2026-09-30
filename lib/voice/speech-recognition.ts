@@ -23,6 +23,11 @@ export class VoiceRecognizer {
   private callbacks: SpeechRecognitionCallbacks;
   private language: string = "en-IN"; // Prefer Indian English
 
+  // Silence auto-finalizer & transcript state
+  private silenceTimer: NodeJS.Timeout | null = null;
+  private pendingInterimTranscript: string = "";
+  private hasDispatchedUtterance: boolean = false;
+
   constructor(callbacks: SpeechRecognitionCallbacks) {
     this.callbacks = callbacks;
   }
@@ -60,9 +65,9 @@ export class VoiceRecognizer {
     this.isStarting = true;
     this.shouldKeepListening = true;
     this.isPausedForTTS = false;
+    this.hasDispatchedUtterance = false;
 
     try {
-      // Re-instantiate recognition instance for fresh state
       if (this.recognition) {
         try {
           this.recognition.abort();
@@ -79,7 +84,7 @@ export class VoiceRecognizer {
       this.recognition.onstart = () => {
         this.isListening = true;
         this.isStarting = false;
-        console.log(`%c[STAGE: LISTENING_STARTED] Language: ${this.language}`, "color: #10b981; font-weight: bold;");
+        console.log(`%c[STAGE: LISTENING_STARTED] Recognition active (${this.language})`, "color: #10b981; font-weight: bold;");
         this.callbacks.onStart?.();
       };
 
@@ -88,12 +93,16 @@ export class VoiceRecognizer {
       };
 
       this.recognition.onresult = (event: any) => {
+        if (this.isPausedForTTS) {
+          return;
+        }
+
         let interimTranscript = "";
         let finalTranscript = "";
 
         for (let i = event.resultIndex; i < event.results.length; ++i) {
           const item = event.results[i];
-          const text = item[0].transcript;
+          const text = item[0]?.transcript || "";
           if (item.isFinal) {
             finalTranscript += text;
           } else {
@@ -101,24 +110,60 @@ export class VoiceRecognizer {
           }
         }
 
+        // If browser provided final transcript, dispatch immediately
         if (finalTranscript.trim()) {
+          if (this.silenceTimer) {
+            clearTimeout(this.silenceTimer);
+            this.silenceTimer = null;
+          }
+          this.pendingInterimTranscript = "";
+          this.hasDispatchedUtterance = true;
           console.log(`%c[STAGE: FINAL_TRANSCRIPT] "${finalTranscript.trim()}"`, "color: #059669; font-weight: bold;");
           this.callbacks.onResult?.(finalTranscript.trim(), true);
-        } else if (interimTranscript.trim()) {
+          return;
+        }
+
+        // Handle interim partial transcript
+        if (interimTranscript.trim()) {
+          this.pendingInterimTranscript = interimTranscript.trim();
+          this.hasDispatchedUtterance = false;
           console.log(`[STAGE: PARTIAL_TRANSCRIPT] "${interimTranscript.trim()}"`);
           this.callbacks.onResult?.(interimTranscript.trim(), false);
+
+          // Reset silence timer: if user stops speaking for 1200ms, auto-commit as final
+          if (this.silenceTimer) {
+            clearTimeout(this.silenceTimer);
+          }
+
+          this.silenceTimer = setTimeout(() => {
+            if (
+              this.pendingInterimTranscript.trim() &&
+              !this.hasDispatchedUtterance &&
+              !this.isPausedForTTS &&
+              this.shouldKeepListening
+            ) {
+              const textToCommit = this.pendingInterimTranscript.trim();
+              console.log(
+                `%c[STAGE: FINAL_TRANSCRIPT (Silence Detected)] "${textToCommit}"`,
+                "color: #059669; font-weight: bold;"
+              );
+              this.pendingInterimTranscript = "";
+              this.hasDispatchedUtterance = true;
+              this.callbacks.onResult?.(textToCommit, true);
+            }
+          }, 1200);
         }
       };
 
       this.recognition.onerror = (event: any) => {
         this.isStarting = false;
 
-        // "no-speech" is a normal browser pause event, ignore silently
+        // "no-speech" is normal when user is quiet between sentences
         if (event.error === "no-speech") {
           return;
         }
 
-        // "aborted" happens when we stop manually during TTS, ignore
+        // "aborted" happens when we stop manually during TTS
         if (event.error === "aborted") {
           return;
         }
@@ -131,6 +176,17 @@ export class VoiceRecognizer {
             "Microphone permission was denied. Please allow microphone access in your browser settings to speak with ARIA."
           );
         } else if (event.error === "network") {
+          // If en-IN fails over network, try falling back to standard English
+          if (this.language !== "en-US") {
+            console.warn("[STAGE: RETRY] Retrying speech recognition with en-US fallback...");
+            this.language = "en-US";
+            setTimeout(() => {
+              if (this.shouldKeepListening && !this.isPausedForTTS) {
+                this.start();
+              }
+            }, 300);
+            return;
+          }
           this.callbacks.onError?.(
             "Speech recognition network timeout. Please check your internet connection."
           );
@@ -143,20 +199,34 @@ export class VoiceRecognizer {
         this.isListening = false;
         this.isStarting = false;
 
-        // Auto-restart loop if user is still on active call and not intentionally paused for TTS
+        // If recognizer ended while there was pending interim speech not yet dispatched, dispatch it!
+        if (
+          this.pendingInterimTranscript.trim() &&
+          !this.hasDispatchedUtterance &&
+          !this.isPausedForTTS &&
+          this.shouldKeepListening
+        ) {
+          const textToCommit = this.pendingInterimTranscript.trim();
+          console.log(
+            `%c[STAGE: FINAL_TRANSCRIPT (Stream End)] "${textToCommit}"`,
+            "color: #059669; font-weight: bold;"
+          );
+          this.pendingInterimTranscript = "";
+          this.hasDispatchedUtterance = true;
+          this.callbacks.onResult?.(textToCommit, true);
+        }
+
+        // Auto-restart loop if user is still on active call and not paused for TTS
         if (this.shouldKeepListening && !this.isPausedForTTS) {
-          try {
-            this.recognition?.start();
-          } catch (err: any) {
-            // If already started or browser is warming up, retry shortly
-            setTimeout(() => {
-              if (this.shouldKeepListening && !this.isPausedForTTS && !this.isListening) {
-                try {
-                  this.recognition?.start();
-                } catch {}
+          setTimeout(() => {
+            if (this.shouldKeepListening && !this.isPausedForTTS && !this.isListening) {
+              try {
+                this.recognition?.start();
+              } catch {
+                this.start();
               }
-            }, 250);
-          }
+            }
+          }, 150);
         } else {
           this.callbacks.onEnd?.();
         }
@@ -167,9 +237,16 @@ export class VoiceRecognizer {
       this.isStarting = false;
       this.isListening = false;
       console.error("[STAGE: ERROR] Recognition start threw exception:", err);
-      // If recognition was already started in DOM, mark listening
+
       if (err?.name === "InvalidStateError") {
-        this.isListening = true;
+        // Recognition already running or recovering
+        setTimeout(() => {
+          if (this.shouldKeepListening && !this.isPausedForTTS && !this.isListening) {
+            try {
+              this.recognition?.start();
+            } catch {}
+          }
+        }, 300);
       } else {
         this.callbacks.onError?.(err?.message || "Failed to start speech recognition.");
       }
@@ -177,10 +254,36 @@ export class VoiceRecognizer {
   }
 
   /**
+   * Manually commit any currently spoken interim transcript immediately
+   */
+  public commitCurrentTranscript(): string | null {
+    if (this.silenceTimer) {
+      clearTimeout(this.silenceTimer);
+      this.silenceTimer = null;
+    }
+    if (this.pendingInterimTranscript.trim() && !this.hasDispatchedUtterance) {
+      const text = this.pendingInterimTranscript.trim();
+      this.pendingInterimTranscript = "";
+      this.hasDispatchedUtterance = true;
+      console.log(`%c[STAGE: FINAL_TRANSCRIPT (Manual Commit)] "${text}"`, "color: #059669; font-weight: bold;");
+      this.callbacks.onResult?.(text, true);
+      return text;
+    }
+    return null;
+  }
+
+  /**
    * Temporarily pauses listening while ARIA is speaking (avoids feedback loop)
    */
   public pauseForTTS() {
     this.isPausedForTTS = true;
+    if (this.silenceTimer) {
+      clearTimeout(this.silenceTimer);
+      this.silenceTimer = null;
+    }
+    this.pendingInterimTranscript = "";
+    this.hasDispatchedUtterance = false;
+
     if (this.recognition && this.isListening) {
       try {
         this.recognition.abort();
@@ -194,7 +297,11 @@ export class VoiceRecognizer {
    */
   public resumeAfterTTS() {
     this.isPausedForTTS = false;
-    if (this.shouldKeepListening && !this.isListening) {
+    this.shouldKeepListening = true;
+    this.pendingInterimTranscript = "";
+    this.hasDispatchedUtterance = false;
+
+    if (!this.isListening && !this.isStarting) {
       this.start();
     }
   }
@@ -203,6 +310,13 @@ export class VoiceRecognizer {
     this.shouldKeepListening = false;
     this.isPausedForTTS = false;
     this.isStarting = false;
+    if (this.silenceTimer) {
+      clearTimeout(this.silenceTimer);
+      this.silenceTimer = null;
+    }
+    this.pendingInterimTranscript = "";
+    this.hasDispatchedUtterance = false;
+
     if (this.recognition) {
       try {
         this.recognition.abort();

@@ -21,6 +21,7 @@ import {
   AlertCircle,
   Activity,
   Terminal,
+  Send,
 } from "lucide-react";
 import { AgentState } from "@/components/VoiceVisualizer";
 import { Message } from "@/lib/agent/chat-engine";
@@ -51,6 +52,8 @@ interface VoiceCallScreenProps {
   interimTranscript?: string;
   diagnosticInfo?: DiagnosticInfo;
   ttsWarningMessage?: string | null;
+  onCommitInterim?: () => void;
+  onSendMessage?: (text: string) => void;
 }
 
 export const VoiceCallScreen: React.FC<VoiceCallScreenProps> = ({
@@ -69,6 +72,8 @@ export const VoiceCallScreen: React.FC<VoiceCallScreenProps> = ({
   interimTranscript = "",
   diagnosticInfo,
   ttsWarningMessage,
+  onCommitInterim,
+  onSendMessage,
 }) => {
   // Call controls
   const [isMuted, setIsMuted] = useState(false);
@@ -78,6 +83,7 @@ export const VoiceCallScreen: React.FC<VoiceCallScreenProps> = ({
   const [callDuration, setCallDuration] = useState(0);
   const [showJsonDetails, setShowJsonDetails] = useState(false);
   const [copiedJson, setCopiedJson] = useState(false);
+  const [textInput, setTextInput] = useState("");
 
   const transcriptScrollRef = useRef<HTMLDivElement | null>(null);
 
@@ -614,12 +620,75 @@ export const VoiceCallScreen: React.FC<VoiceCallScreenProps> = ({
 
                 {/* Live Interim Transcript (as user speaks) */}
                 {interimTranscript && (
-                  <div className="p-2 rounded-xl bg-blue-50/70 border border-blue-200/60 space-y-0.5 animate-pulse">
-                    <span className="font-semibold text-[10px] text-blue-700 uppercase tracking-wider block">
-                      You (speaking…):
-                    </span>
-                    <p className="text-[#17131A] italic">&ldquo;{interimTranscript}&rdquo;</p>
+                  <div className="p-2.5 rounded-xl bg-purple-50/80 border border-purple-200 space-y-1 animate-pulse flex items-center justify-between">
+                    <div className="flex-1 min-w-0 pr-2">
+                      <span className="font-semibold text-[10px] text-[#4B2859] uppercase tracking-wider block">
+                        You (speaking…):
+                      </span>
+                      <p className="text-[#17131A] text-xs italic truncate">&ldquo;{interimTranscript}&rdquo;</p>
+                    </div>
+                    {onCommitInterim && (
+                      <button
+                        onClick={onCommitInterim}
+                        className="px-2.5 py-1 rounded-lg bg-[#4B2859] hover:bg-[#381E43] text-white text-[11px] font-semibold shrink-0 cursor-pointer shadow-xs transition-colors"
+                        title="Send speech immediately"
+                      >
+                        Send Now ➔
+                      </button>
+                    )}
                   </div>
+                )}
+              </div>
+
+              {/* Inline Quick Input & Example Prompt Chips (Resilient Fallback) */}
+              <div className="p-3 bg-[#FAF9FB] border-t border-[#E9E5EB] space-y-2">
+                {/* Example query chips */}
+                <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-[11px] no-scrollbar">
+                  <span className="text-[10px] text-[#716A77] uppercase font-bold shrink-0">Ask:</span>
+                  {[
+                    "Where is ORD-101?",
+                    "Can I cancel ORD-103?",
+                    "Can I return ORD-102?",
+                    "What did I order in ORD-104?",
+                  ].map((chip) => (
+                    <button
+                      key={chip}
+                      onClick={() => onSendMessage?.(chip)}
+                      className="px-2.5 py-1 rounded-full bg-white hover:bg-[#F0EAF4] border border-[#E9E5EB] text-[#17131A] hover:text-[#4B2859] text-[11px] whitespace-nowrap transition-colors cursor-pointer shrink-0"
+                    >
+                      {chip}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Inline text input (Speaks answer aloud in Voice mode!) */}
+                {onSendMessage && (
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      if (textInput.trim()) {
+                        onSendMessage(textInput.trim());
+                        setTextInput("");
+                      }
+                    }}
+                    className="flex items-center gap-2"
+                  >
+                    <input
+                      type="text"
+                      value={textInput}
+                      onChange={(e) => setTextInput(e.target.value)}
+                      placeholder="Type a question or speak into your mic..."
+                      className="flex-1 bg-white border border-[#E9E5EB] rounded-full px-3.5 py-1.5 text-xs text-[#17131A] placeholder:text-[#716A77] focus:outline-none focus:border-[#4B2859]"
+                    />
+                    <button
+                      type="submit"
+                      disabled={!textInput.trim()}
+                      className="p-1.5 rounded-full bg-[#4B2859] disabled:opacity-40 hover:bg-[#381E43] text-white transition-all cursor-pointer disabled:cursor-not-allowed"
+                      title="Send message"
+                    >
+                      <Send className="w-3.5 h-3.5" />
+                    </button>
+                  </form>
                 )}
               </div>
             </div>
