@@ -1,12 +1,13 @@
 # ARIA — Aura Skincare AI Voice & Chat Customer Support Agent
 
-[![Live Demo](https://img.shields.io/badge/Live_Demo-https%3A%2F%2Ff4d6ac484af912.lhr.life-brightgreen?style=for-the-badge&logo=google-chrome)](https://f4d6ac484af912.lhr.life)
+[![Live Vercel](https://img.shields.io/badge/Vercel_Production-https%3A%2F%2Faura--skincare--voice--agent.vercel.app-brightgreen?style=for-the-badge&logo=vercel)](https://aura-skincare-voice-agent.vercel.app)
+[![Live Demo](https://img.shields.io/badge/Live_Tunnel-https%3A%2F%2Ff4d6ac484af912.lhr.life-blue?style=for-the-badge&logo=google-chrome)](https://f4d6ac484af912.lhr.life)
 [![Next.js 16](https://img.shields.io/badge/Next.js-16.3-black?style=flat&logo=next.js)](https://nextjs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0-blue?style=flat&logo=typescript)](https://www.typescriptlang.org/)
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind-v4-purple?style=flat&logo=tailwindcss)](https://tailwindcss.com/)
 [![Web Speech API](https://img.shields.io/badge/Audio-Web%20Speech%20API-emerald?style=flat)](https://developer.mozilla.org/en-US/docs/Web/API/Web_Speech_API)
-[![Test Suite](https://img.shields.io/badge/Scenarios-20%2F20%20PASS-brightgreen?style=flat)](scripts/test-scenarios.ts)
-[![Regression Tests](https://img.shields.io/badge/Utterances-1%2C618%2F1%2C618%20PASS-brightgreen?style=flat)](scripts/test-1000-questions.ts)
+[![Test Suite](https://img.shields.io/badge/Scenarios-31%2F31%20PASS-brightgreen?style=flat)](scripts/test-scenarios.ts)
+[![Regression Tests](https://img.shields.io/badge/Utterances-1%2C748%2F1%2C748%20PASS-brightgreen?style=flat)](scripts/test-1000-questions.ts)
 
 > **DataStraw Internship Assessment Submission**  
 > A production-grade AI Customer Support Agent tailored for **Aura Skincare**, featuring **ARIA**, an Indian customer-support voice & chat specialist. Built with real browser microphone audio capture, continuous speech-to-text, semantic intent reasoning, genuine tool execution, strict policy guardrails, real-time barge-in interruption, and structured post-call operational intelligence.
@@ -17,8 +18,9 @@
 
 | Environment | Access Link | Description |
 |-------------|-------------|-------------|
-| **Public HTTPS (Primary)** | **[https://f4d6ac484af912.lhr.life](https://f4d6ac484af912.lhr.life)** | SSL/TLS terminated, mobile & desktop ready |
-| **Localtunnel Mirror** | **[https://itchy-mugs-say.loca.lt](https://itchy-mugs-say.loca.lt)** | Tunnel IP / Password: `103.158.247.174` |
+| **Vercel Production (Global CDN)** | **[https://aura-skincare-voice-agent.vercel.app](https://aura-skincare-voice-agent.vercel.app)** | Permanent high-availability worldwide deployment on Vercel Edge |
+| **Vercel Direct Deployment** | **[https://aura-skincare-voice-agent-iasaaam1i.vercel.app](https://aura-skincare-voice-agent-iasaaam1i.vercel.app)** | Direct immutable deployment URL |
+| **Public HTTPS Tunnel** | **[https://f4d6ac484af912.lhr.life](https://f4d6ac484af912.lhr.life)** | SSL/TLS terminated dev tunnel |
 | **Local Machine** | **[http://localhost:3000](http://localhost:3000)** | Local Next.js dev server |
 
 ---
