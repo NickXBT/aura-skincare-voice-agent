@@ -104,6 +104,12 @@ export const OrderSummaryCard: React.FC<OrderSummaryCardProps> = ({ order }) => 
           <span>Customer:</span>
           <span className="font-medium text-[#17131A]">{order.customerName}</span>
         </div>
+        <div className="flex justify-between items-center pt-1 border-t border-[#E9E5EB]/60">
+          <span>Cancellation:</span>
+          <span className={`text-[11px] font-semibold ${order.cancellation_eligible ? "text-emerald-700" : "text-zinc-600"}`}>
+            {order.cancellation_eligible ? "Cancellation eligible" : "Cancellation unavailable"}
+          </span>
+        </div>
       </div>
     </div>
   );

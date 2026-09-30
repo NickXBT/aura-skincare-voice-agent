@@ -1,11 +1,14 @@
-import { getOrderById, normalizeOrderId, cancelOrderInDb, Order } from "@/lib/orders/database";
+import { getOrderById, normalizeOrderId, cancelOrderInDb, Order, OrderAuditEvent } from "@/lib/orders/database";
 
 export interface ToolCallResult {
   tool: string;
   orderId: string;
   found: boolean;
+  success?: boolean;
+  new_status?: string;
   order?: Order;
   message: string;
+  auditEvent?: OrderAuditEvent;
 }
 
 export const ORDER_TOOL_DEFINITION = {
@@ -47,6 +50,7 @@ export function executeGetOrderDetails(orderIdRaw: string): ToolCallResult {
       tool: "get_order_details",
       orderId: "",
       found: false,
+      success: false,
       message: "Error: Missing order ID. Please ask the customer to provide their specific order ID (e.g., ORD-101).",
     };
   }
@@ -59,6 +63,7 @@ export function executeGetOrderDetails(orderIdRaw: string): ToolCallResult {
       tool: "get_order_details",
       orderId: normalized || orderIdRaw,
       found: false,
+      success: false,
       message: `Order '${orderIdRaw.trim().toUpperCase()}' could not be located in our system. Please ask the customer to verify their order ID.`,
     };
   }
@@ -81,6 +86,7 @@ export function executeGetOrderDetails(orderIdRaw: string): ToolCallResult {
     tool: "get_order_details",
     orderId: order.id,
     found: true,
+    success: true,
     order,
     message: summary,
   };
@@ -95,6 +101,7 @@ export function executeCancelOrder(orderIdRaw: string): ToolCallResult {
       tool: "cancel_order",
       orderId: "",
       found: false,
+      success: false,
       message: "Error: Missing order ID. Please specify which order to cancel.",
     };
   }
@@ -106,7 +113,10 @@ export function executeCancelOrder(orderIdRaw: string): ToolCallResult {
     tool: "cancel_order",
     orderId: normalized,
     found: !!result.order,
+    success: result.success,
+    new_status: result.new_status,
     order: result.order,
     message: result.message,
+    auditEvent: result.auditEvent,
   };
 }

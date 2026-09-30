@@ -1,5 +1,6 @@
 // Comprehensive test suite for all 20 exact assessment conversations
 import { processIntelligentTurn, Message } from "../lib/agent/chat-engine";
+import { getOrderById, getAuditLog } from "../lib/orders/database";
 
 console.log("===============================================================");
 console.log("🧪 RUNNING 20 EXACT TEST CONVERSATIONS FOR ARIA AI AGENT");
@@ -228,6 +229,43 @@ assert(
   turn21b.reply.toLowerCase().includes("has been cancelled successfully") &&
   turn21b.reply.toLowerCase().includes("ord-103"),
   "21b. Customer confirms cancellation (Calls cancel_order and confirms successful cancellation)"
+);
+
+// 21c. Post-Cancellation Status Lookup (ORD-103)
+const turn21c = processIntelligentTurn([
+  { role: "user", content: "What's the status of ORD-103?" },
+]);
+assert(
+  turn21c.reply.toLowerCase().includes("cancelled") &&
+  !turn21c.reply.toLowerCase().includes("processing"),
+  "21c. Post-Cancellation Status Lookup (ORD-103 shows Cancelled, NOT Processing)"
+);
+
+// 21d. Cannot cancel again (ORD-103)
+const turn21d = processIntelligentTurn([
+  { role: "user", content: "Cancel ORD-103 again" },
+]);
+assert(
+  turn21d.reply.toLowerCase().includes("already been cancelled") &&
+  !turn21d.toolCallsExecuted.some((t) => t.tool === "cancel_order"),
+  "21d. Cannot cancel again (Rejects with 'already been cancelled', no second cancellation tool call)"
+);
+
+// 21e. Cancellation Audit Event
+const auditLog = getAuditLog();
+const hasAudit = auditLog.some(
+  (e) => e.order_id === "ORD-103" && e.event === "ORDER_CANCELLED" && e.confirmed_by_customer === true
+);
+assert(hasAudit, "21e. Cancellation Audit Event (Recorded ORDER_CANCELLED event for ORD-103 with timestamp)");
+
+// 21f. Underlying Order Database State Mutation
+const order103 = getOrderById("ORD-103");
+assert(
+  order103?.order_status === "Cancelled" &&
+  order103?.cancellation_eligible === false &&
+  order103?.cancelled === true &&
+  typeof order103?.cancelled_at === "string",
+  "21f. Underlying Order State (Single source of truth updated with cancelled: true and cancelled_at timestamp)"
 );
 
 // 22. Negative Cancellation: Shipped Order (ORD-105)

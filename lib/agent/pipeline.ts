@@ -484,10 +484,10 @@ export function executePipeline(messages: Message[]): PipelineResult {
           reply = isHinglish
             ? `Order ${o.id} (${o.product}) abhi processing status mein hai (placed ${o.orderedAgo || "recently"}). Yeh cancellation ke liye eligible hai.`
             : `Order ${o.id} for the ${o.product} is currently processing (placed ${o.orderedAgo || "recently"}) and is eligible for cancellation.`;
-        } else if (o.status === "Cancelled") {
+        } else if (o.status === "Cancelled" || o.cancelled) {
           reply = isHinglish
-            ? `Order ${o.id} cancel ho chuka hai (payment status: ${o.payment_status}).`
-            : `Order ${o.id} has been cancelled (payment status: ${o.payment_status}).`;
+            ? `Order ${o.id} cancel ho chuka hai.`
+            : `Order ${o.id} has been cancelled.`;
         } else {
           reply = `Order ${o.id} status is ${o.status}.`;
         }

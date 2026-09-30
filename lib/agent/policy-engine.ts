@@ -136,10 +136,10 @@ export function evaluateCancellationPolicy(
   }
 
   // Cancelled
-  if (order?.status === "Cancelled") {
+  if (order?.status === "Cancelled" || order?.cancelled) {
     const response = isHinglish
-      ? `Order ${order.id} pehle hi cancel ho chuka hai aur refund initiate ho chuka hai.`
-      : `Order ${order.id} has already been cancelled and refund has been initiated.`;
+      ? `${order.id} pehle hi cancel ho chuka hai.`
+      : `${order.id} has already been cancelled.`;
     return {
       allowed: false,
       policyName: "CANCELLATION",

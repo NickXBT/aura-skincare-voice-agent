@@ -171,7 +171,14 @@ export function generateCallSummary(
   } else if (intent === "ORDER_TRACKING") {
     summaryText = `Customer requested live status for ${orderId || "their order"}. Aria executed the order lookup tool and provided courier, tracking code, and expected delivery status.`;
   } else if (intent === "ORDER_CANCELLATION") {
-    summaryText = `Customer requested cancellation for ${orderId || "an order"}. Order status was verified; policies for processing or out-for-delivery states were clearly communicated.`;
+    const isCancelledSuccess =
+      toolCalls.some((t) => t.tool === "cancel_order" && t.success) ||
+      lowerFull.includes("has been cancelled successfully");
+    if (isCancelledSuccess) {
+      summaryText = `Customer requested cancellation of ${orderId || "the order"}. The order was Processing and eligible for cancellation. Customer confirmed the cancellation and the order was successfully cancelled.`;
+    } else {
+      summaryText = `Customer requested cancellation for ${orderId || "an order"}. Order status was verified; policies for processing or out-for-delivery states were clearly communicated.`;
+    }
   } else if (intent === "RETURN_REQUEST") {
     summaryText = `Customer asked regarding return eligibility. Aria explained the 7-day unopened product policy and assisted with standard procedures.`;
   } else if (intent === "SHIPPING_INFORMATION" || intent === "COD_INFORMATION") {

@@ -20,6 +20,12 @@ import {
   deleteStoredConversation,
   generateConversationTitle,
 } from "@/lib/storage/conversations";
+import {
+  getAllMockOrders,
+  getCancelledOrderIds,
+  loadPersistedClientOrders,
+  Order,
+} from "@/lib/orders/database";
 
 export default function Home() {
   // App Navigation: "landing" | "talk" | "chat"
@@ -28,6 +34,9 @@ export default function Home() {
   // Modals
   const [ordersModalOpen, setOrdersModalOpen] = useState(false);
   const [guideModalOpen, setGuideModalOpen] = useState(false);
+
+  // Live Synchronized Orders (Shared single source of truth across Chat, Talk, and Modals)
+  const [orders, setOrders] = useState<Order[]>([]);
 
   // Shared Conversation & Context
   const [messages, setMessages] = useState<Message[]>([]);
@@ -55,10 +64,20 @@ export default function Home() {
   const isCallActiveRef = useRef<boolean>(isCallActive);
   isCallActiveRef.current = isCallActive;
 
-  // Load conversations on mount
+  // Load conversations and persisted orders on mount
   useEffect(() => {
     const stored = loadStoredConversations();
     setConversations(stored);
+
+    // Synchronize client-side persistent cancellations from browser storage
+    loadPersistedClientOrders();
+    setOrders([...getAllMockOrders()]);
+
+    const handleOrderCancelled = () => {
+      setOrders([...getAllMockOrders()]);
+    };
+    window.addEventListener("aura-order-cancelled", handleOrderCancelled);
+    return () => window.removeEventListener("aura-order-cancelled", handleOrderCancelled);
   }, []);
 
   // Initialize Speech Synthesis and Audio Amplitude Tracker
@@ -154,10 +173,14 @@ export default function Home() {
       const timeoutId = setTimeout(() => abortController.abort(), 12000);
 
       try {
+        const currentCancelledIds = getCancelledOrderIds();
         const res = await fetch("/api/agent/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ messages: updatedHistory }),
+          body: JSON.stringify({
+            messages: updatedHistory,
+            cancelledOrderIds: currentCancelledIds,
+          }),
           signal: abortController.signal,
         });
 
@@ -165,10 +188,19 @@ export default function Home() {
 
         if (!res.ok) throw new Error(`HTTP error ${res.status}`);
 
-        const data: ChatResponse = await res.json();
+        const data: ChatResponse & {
+          updatedOrders?: Order[];
+          cancelledOrderIds?: string[];
+        } = await res.json();
         const replyText = data.reply;
 
         console.log(`%c[STAGE: AI_RESPONSE_RECEIVED] Reply: "${replyText.slice(0, 70)}..."`, "color: #10b981; font-weight: bold;");
+
+        if (data.updatedOrders && Array.isArray(data.updatedOrders)) {
+          setOrders(data.updatedOrders);
+        } else {
+          setOrders([...getAllMockOrders()]);
+        }
 
         if (data.toolCallsExecuted && data.toolCallsExecuted.length > 0) {
           setAccumulatedToolCalls((prev) => [...prev, ...data.toolCallsExecuted]);
@@ -503,6 +535,7 @@ export default function Home() {
       <TestOrdersModal
         isOpen={ordersModalOpen}
         onClose={() => setOrdersModalOpen(false)}
+        orders={orders}
         onSelectOrderPrompt={(orderId) => {
           setCurrentMode("chat");
           handleSendMessage(`Where is my order ${orderId}?`, false);

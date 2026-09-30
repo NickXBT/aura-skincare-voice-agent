@@ -34,7 +34,23 @@ export interface Order {
   return_deadline?: string;
   delivery_attempts?: number;
   notes?: string;
+  cancelled?: boolean;
+  cancelled_at?: string;
+  cancellation_reason?: string;
 }
+
+export interface OrderAuditEvent {
+  event: "ORDER_CANCELLED";
+  order_id: string;
+  timestamp: string;
+  source: "ARIA";
+  confirmed_by_customer: boolean;
+}
+
+export const ORDER_STORAGE_KEYS = {
+  CANCELLED_ORDERS: "aura_cancelled_orders_v1",
+  AUDIT_LOG: "aura_orders_audit_log_v1",
+};
 
 const INITIAL_MOCK_ORDERS: Record<string, Order> = {
   "ORD-101": {
@@ -388,24 +404,144 @@ export function getAllMockOrders(): Order[] {
   return Object.values(MOCK_ORDERS);
 }
 
+const AUDIT_LOG: OrderAuditEvent[] = [];
+
 /**
- * Real cancellation action that modifies order state in memory:
+  * Returns the full audit log of order cancellations.
+  */
+export function getAuditLog(): OrderAuditEvent[] {
+  return [...AUDIT_LOG];
+}
+
+/**
+ * Returns list of order IDs that are currently cancelled.
+ */
+export function getCancelledOrderIds(): string[] {
+  return Object.values(MOCK_ORDERS)
+    .filter((o) => o.order_status === "Cancelled" || o.cancelled)
+    .map((o) => o.id);
+}
+
+/**
+ * Synchronizes cancelled order IDs and audit records from client persistent storage.
+ */
+export function applyClientCancelledOrders(
+  cancelledIds: string[],
+  auditEvents?: OrderAuditEvent[]
+): void {
+  if (Array.isArray(cancelledIds)) {
+    for (const rawId of cancelledIds) {
+      const id = normalizeOrderId(rawId);
+      const order = MOCK_ORDERS[id];
+      if (order) {
+        order.order_status = "Cancelled";
+        order.status = "Cancelled";
+        order.cancellation_eligible = false;
+        order.cancellationEligible = false;
+        order.cancelled = true;
+        order.cancelled_at = order.cancelled_at || new Date().toISOString();
+        order.cancellation_reason = "Customer requested cancellation";
+        order.payment_status = "Refunded";
+        order.notes = "Cancelled by customer via ARIA AI customer support.";
+      }
+    }
+  }
+
+  if (Array.isArray(auditEvents)) {
+    for (const evt of auditEvents) {
+      if (!AUDIT_LOG.some((e) => e.order_id === evt.order_id && e.timestamp === evt.timestamp)) {
+        AUDIT_LOG.push(evt);
+      }
+    }
+  }
+}
+
+/**
+ * Helper to save cancellation state to localStorage when running in browser.
+ */
+function syncToLocalStorage(orderId: string, auditEvent?: OrderAuditEvent): void {
+  if (typeof window === "undefined") return;
+  try {
+    const existing = localStorage.getItem(ORDER_STORAGE_KEYS.CANCELLED_ORDERS);
+    const ids: string[] = existing ? JSON.parse(existing) : [];
+    if (!ids.includes(orderId)) {
+      ids.push(orderId);
+      localStorage.setItem(ORDER_STORAGE_KEYS.CANCELLED_ORDERS, JSON.stringify(ids));
+    }
+    if (auditEvent) {
+      const existingAudit = localStorage.getItem(ORDER_STORAGE_KEYS.AUDIT_LOG);
+      const audits: OrderAuditEvent[] = existingAudit ? JSON.parse(existingAudit) : [];
+      if (!audits.some((a) => a.order_id === auditEvent.order_id && a.timestamp === auditEvent.timestamp)) {
+        audits.push(auditEvent);
+        localStorage.setItem(ORDER_STORAGE_KEYS.AUDIT_LOG, JSON.stringify(audits));
+      }
+    }
+    // Dispatch browser event so any open UI components update in real time
+    window.dispatchEvent(
+      new CustomEvent("aura-order-cancelled", { detail: { orderId } })
+    );
+  } catch (e) {
+    console.warn("Could not sync cancelled order to localStorage:", e);
+  }
+}
+
+/**
+ * Loads persisted cancellations from browser localStorage if available.
+ */
+export function loadPersistedClientOrders(): void {
+  if (typeof window === "undefined") return;
+  try {
+    const saved = localStorage.getItem(ORDER_STORAGE_KEYS.CANCELLED_ORDERS);
+    if (saved) {
+      const ids: string[] = JSON.parse(saved);
+      applyClientCancelledOrders(ids);
+    }
+    const savedAudit = localStorage.getItem(ORDER_STORAGE_KEYS.AUDIT_LOG);
+    if (savedAudit) {
+      const events: OrderAuditEvent[] = JSON.parse(savedAudit);
+      applyClientCancelledOrders([], events);
+    }
+  } catch (e) {
+    console.warn("Could not load persisted orders from localStorage:", e);
+  }
+}
+
+// Automatically load persisted cancellations on browser client startup
+if (typeof window !== "undefined") {
+  loadPersistedClientOrders();
+}
+
+/**
+ * Real cancellation action that modifies order state in memory and persists to storage:
  * Allowed ONLY when order_status === "Processing"
  */
-export function cancelOrderInDb(orderId: string): { success: boolean; order?: Order; message: string } {
+export function cancelOrderInDb(
+  orderId: string,
+  source: "ARIA" = "ARIA"
+): {
+  success: boolean;
+  order_id: string;
+  new_status?: string;
+  order?: Order;
+  message: string;
+  auditEvent?: OrderAuditEvent;
+} {
   const normalized = normalizeOrderId(orderId);
   const order = MOCK_ORDERS[normalized];
 
   if (!order) {
     return {
       success: false,
+      order_id: normalized || orderId,
       message: `Order ${normalized || orderId} could not be located in our system.`,
     };
   }
 
-  if (order.order_status === "Cancelled") {
+  if (order.order_status === "Cancelled" || order.cancelled) {
     return {
       success: false,
+      order_id: order.id,
+      new_status: "Cancelled",
       order,
       message: `Order ${order.id} has already been cancelled.`,
     };
@@ -414,23 +550,46 @@ export function cancelOrderInDb(orderId: string): { success: boolean; order?: Or
   if (order.order_status !== "Processing") {
     return {
       success: false,
+      order_id: order.id,
+      new_status: order.order_status,
       order,
       message: `Order ${order.id} cannot be cancelled because it is already ${order.order_status}.`,
     };
   }
+
+  const timestamp = new Date().toISOString();
 
   // Perform actual state change
   order.order_status = "Cancelled";
   order.status = "Cancelled";
   order.cancellation_eligible = false;
   order.cancellationEligible = false;
+  order.cancelled = true;
+  order.cancelled_at = timestamp;
+  order.cancellation_reason = "Customer requested cancellation";
   order.payment_status = "Refunded";
   order.notes = "Cancelled by customer via ARIA AI customer support.";
 
+  const auditEvent: OrderAuditEvent = {
+    event: "ORDER_CANCELLED",
+    order_id: order.id,
+    timestamp,
+    source,
+    confirmed_by_customer: true,
+  };
+
+  AUDIT_LOG.push(auditEvent);
+
+  // Synchronize to localStorage if running in browser
+  syncToLocalStorage(order.id, auditEvent);
+
   return {
     success: true,
+    order_id: order.id,
+    new_status: "Cancelled",
     order,
     message: `Done. Your order ${order.id} has been cancelled successfully.`,
+    auditEvent,
   };
 }
 
@@ -442,4 +601,11 @@ export function resetMockOrders(): void {
     delete MOCK_ORDERS[key];
   }
   Object.assign(MOCK_ORDERS, JSON.parse(JSON.stringify(INITIAL_MOCK_ORDERS)));
+  AUDIT_LOG.length = 0;
+  if (typeof window !== "undefined") {
+    try {
+      localStorage.removeItem(ORDER_STORAGE_KEYS.CANCELLED_ORDERS);
+      localStorage.removeItem(ORDER_STORAGE_KEYS.AUDIT_LOG);
+    } catch {}
+  }
 }

@@ -1,22 +1,43 @@
 "use client";
 
-import React from "react";
+import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { getAllMockOrders } from "@/lib/orders/database";
+import { getAllMockOrders, Order } from "@/lib/orders/database";
 import { X, Package, Truck, CheckCircle2, Clock, XCircle, MapPin, CreditCard } from "lucide-react";
 
 interface TestOrdersModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSelectOrderPrompt?: (orderId: string) => void;
+  orders?: Order[];
 }
 
 export const TestOrdersModal: React.FC<TestOrdersModalProps> = ({
   isOpen,
   onClose,
   onSelectOrderPrompt,
+  orders: ordersProp,
 }) => {
-  const orders = getAllMockOrders();
+  const [liveOrders, setLiveOrders] = useState<Order[]>(ordersProp || getAllMockOrders());
+
+  useEffect(() => {
+    if (ordersProp) {
+      setLiveOrders(ordersProp);
+    } else {
+      setLiveOrders(getAllMockOrders());
+    }
+  }, [ordersProp, isOpen]);
+
+  // Listen to live cancellation event so UI updates immediately without refresh
+  useEffect(() => {
+    const handleOrderCancelled = () => {
+      setLiveOrders([...getAllMockOrders()]);
+    };
+    window.addEventListener("aura-order-cancelled", handleOrderCancelled);
+    return () => window.removeEventListener("aura-order-cancelled", handleOrderCancelled);
+  }, []);
+
+  const orders = liveOrders;
 
   if (!isOpen) return null;
 
@@ -95,9 +116,13 @@ export const TestOrdersModal: React.FC<TestOrdersModalProps> = ({
                     <span className="text-xs text-[#716A77]">({o.phone_last4 ? `••${o.phone_last4}` : ""})</span>
                   </div>
                   <div className="flex items-center gap-1.5">
-                    {o.cancellation_eligible && (
-                      <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
-                        Can Cancel
+                    {o.cancellation_eligible ? (
+                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
+                        Cancellation eligible
+                      </span>
+                    ) : (
+                      <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-zinc-100 text-zinc-600 border border-zinc-200">
+                        Cancellation unavailable
                       </span>
                     )}
                     <span className={`text-[11px] font-semibold px-2.5 py-0.5 rounded-full border ${getStatusBadge(o.status, o.cancellation_eligible)}`}>
