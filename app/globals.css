@@ -1,0 +1,82 @@
+@import "tailwindcss";
+
+:root {
+  --color-white: #FFFFFF;
+  --color-canvas: #FCFBFD;
+  --color-secondary-bg: #FAF9FB;
+  --color-near-black: #17131A;
+  --color-secondary-text: #716A77;
+  --color-deep-purple: #4B2859;
+  --color-soft-purple: #F0EAF4;
+  --color-border: #E9E5EB;
+}
+
+body {
+  background-color: #FFFFFF;
+  color: #17131A;
+  font-family: var(--font-geist-sans), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  overflow-x: hidden;
+  letter-spacing: -0.012em;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Custom subtle scrollbar */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #EDE5F2;
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #32183F;
+}
+
+/* Organic breathing & atmospheric animations */
+@keyframes orbAtmosphere {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.65;
+  }
+  50% {
+    transform: scale(1.06);
+    opacity: 0.9;
+  }
+}
+
+@keyframes orbInnerPulse {
+  0%, 100% {
+    transform: scale(0.98);
+  }
+  50% {
+    transform: scale(1.02);
+  }
+}
+
+@keyframes slowOrbit {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-orb-atmosphere {
+  animation: orbAtmosphere 5.5s ease-in-out infinite;
+}
+
+.animate-orb-inner {
+  animation: orbInnerPulse 4s ease-in-out infinite;
+}
+
+.animate-slow-orbit {
+  animation: slowOrbit 18s linear infinite;
+}
