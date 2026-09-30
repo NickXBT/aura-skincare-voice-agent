@@ -146,15 +146,37 @@ export function executePipeline(messages: Message[]): PipelineResult {
   // 8. THANKS & GOODBYE
   else if (intent === "THANKS") {
     decision = "ACKNOWLEDGE_THANKS";
-    reply = isHinglish
-      ? "Aapka swagat hai! Agar aur koi sawaal ho toh zaroor bataiye."
-      : "You're welcome! Let me know if you need anything else with your Aura Skincare order.";
+    const thanksReplies = isHinglish
+      ? [
+          "Bilkul! Aapka bahut swagat hai. Koi aur sawaal ho toh zaroor bataiye!",
+          "Aapka swagat hai! Umeed hai aapko Aura Skincare ka experience pasand aaya hoga.",
+          "Khushi hui madad karke! Koi aur cheez chahiye toh main yahan hoon.",
+          "Aapka shukriya! Kuch aur help chahiye toh bataiye.",
+        ]
+      : [
+          "You're very welcome! Is there anything else I can help you with?",
+          "Happy to help! Enjoy your Aura Skincare products!",
+          "Of course! It was a pleasure assisting you. Have a great day!",
+          "You're welcome! Don't hesitate to reach out if you need anything else.",
+          "Absolutely! Take care, and have a wonderful day!",
+        ];
+    reply = thanksReplies[Math.floor(Math.random() * thanksReplies.length)];
   }
   else if (intent === "GOODBYE") {
     decision = "SAY_GOODBYE";
-    reply = isHinglish
-      ? "Shukriya Aura Skincare se sampark karne ke liye. Have a wonderful day!"
-      : "Thank you for reaching out to Aura Skincare. Have a wonderful day!";
+    const goodbyeReplies = isHinglish
+      ? [
+          "Alvida! Aura Skincare mein aapka swagat hai kabhi bhi. Take care!",
+          "Shukriya contact karne ke liye! Have a wonderful day!",
+          "Bahut achha laga aapki madad karke. Alvida aur take care!",
+        ]
+      : [
+          "Take care! Have a wonderful day ahead!",
+          "Goodbye! Thanks for choosing Aura Skincare. Have a lovely day!",
+          "Thank you for reaching out! Have a great day, and enjoy your skincare!",
+          "All the best! It was lovely speaking with you. Goodbye!",
+        ];
+    reply = goodbyeReplies[Math.floor(Math.random() * goodbyeReplies.length)];
   }
 
   // 9. RETURNED ORDER LOOKUP

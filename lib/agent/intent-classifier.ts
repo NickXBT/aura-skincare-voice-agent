@@ -204,12 +204,24 @@ export function classifyIntent(
     return { intent: "GREETING", confidence: 0.96, isHinglish, normalizedQuery: norm, secondaryIntents };
   }
 
-  // 7. THANKS & GOODBYE
-  if (/^(thanks|thank you|thanks a lot|thank you so much|that's helpful|perfect|great|okay thanks|ok thanks|shukriya|dhanyawaad)$/i.test(norm)) {
+  // 7. THANKS & GOODBYE — detect from anywhere in the sentence, not just exact matches
+  const isThanks =
+    /\b(thank you|thanks|shukriya|dhanyawad|dhanyawaad|bahut shukriya|bahut dhanyawad|aapka shukriya)\b/i.test(norm) ||
+    /^(perfect|great|awesome|amazing|that'?s (great|perfect|all|helpful|it)|you'?ve been (very |really |so )?(helpful|great)|i('?m| am) (good|sorted|all set) now|that covers it|no more questions|nothing else)$/i.test(norm) ||
+    /\b(that('?s| is) (all|it|everything)|no (more )?questions?|nothing else|i'm (good|fine|set|sorted) (now|thanks)?|you('?ve| have) been (very |really |so )?(helpful|great|wonderful))\b/i.test(norm);
+
+  const isGoodbye =
+    /\b(bye|goodbye|bye[\s-]bye|tata|alvida|see you|take care|have a (good|great|nice|lovely) (day|one|evening|night)|ciao|cheerio|farewell)\b/i.test(norm) ||
+    /^(i('?ll| will) go now|that'?s all|nothing else|i don't need anything else|all good|i'?m good now|all done)$/i.test(norm);
+
+  if (isThanks && !isGoodbye) {
     return { intent: "THANKS", confidence: 0.95, isHinglish, normalizedQuery: norm, secondaryIntents };
   }
-  if (/^(bye|goodbye|bye bye|see you|i'll go now|that's all|i don't need anything else|nothing else|tata|alvida)$/i.test(norm)) {
+  if (isGoodbye) {
     return { intent: "GOODBYE", confidence: 0.95, isHinglish, normalizedQuery: norm, secondaryIntents };
+  }
+  if (isThanks) {
+    return { intent: "THANKS", confidence: 0.95, isHinglish, normalizedQuery: norm, secondaryIntents };
   }
 
   // 8. RETURNED ORDER LOOKUP
