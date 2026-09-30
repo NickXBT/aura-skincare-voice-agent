@@ -453,6 +453,52 @@ export function generateTestCases(): TestCase[] {
     tests.push({ query: t });
   });
 
+  // 13. Delivery Address Queries (generate 60)
+  const addressTemplates = [
+    "Where will my order be delivered?",
+    "What is the delivery address?",
+    "Where is this package being delivered?",
+    "What address do you have on file?",
+    "Check my delivery address.",
+    "Which address is it going to?",
+    "kis address pe aayega?",
+    "delivery address kya hai?",
+    "address batayein.",
+    "kahan deliver hoga?",
+  ];
+  addressTemplates.forEach((t) => {
+    tests.push({ query: t });
+    ["ORD-101", "ORD-103", "ORD-104", "ORD-106"].forEach((id) => {
+      tests.push({ query: `${t} for ${id}` });
+    });
+  });
+
+  // 14. Payment Method & Status Queries (generate 50)
+  const paymentQueryTemplates = [
+    "How did I pay for this?",
+    "What was the payment method?",
+    "Did I pay online?",
+    "Is this order cash on delivery?",
+    "Payment mode kya tha?",
+    "Payment status check karein.",
+  ];
+  paymentQueryTemplates.forEach((t) => {
+    tests.push({ query: t });
+    ["ORD-101", "ORD-105", "ORD-106", "ORD-110"].forEach((id) => {
+      tests.push({ query: `${t} for ${id}` });
+    });
+  });
+
+  // 15. 10-Order Full Matrix Status Lookups (generate 100)
+  const orderList = ["ORD-101", "ORD-102", "ORD-103", "ORD-104", "ORD-105", "ORD-106", "ORD-107", "ORD-108", "ORD-109", "ORD-110"];
+  orderList.forEach((id) => {
+    tests.push({ query: `Where is ${id}?`, expectedOrderId: id });
+    tests.push({ query: `Check ${id}`, expectedOrderId: id });
+    tests.push({ query: `Track ${id}`, expectedOrderId: id });
+    tests.push({ query: `What did I order in ${id}?`, expectedOrderId: id });
+    tests.push({ query: `Status of ${id}`, expectedOrderId: id });
+  });
+
   return tests;
 }
 

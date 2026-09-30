@@ -208,6 +208,129 @@ testSingle(
   "20. I want my money back. (Refund policy explanation)"
 );
 
+// 21. Real Cancellation Two-Step Confirmation Flow (ORD-103)
+console.log("\n--- Two-Step Cancellation Confirmation Test (ORD-103) ---");
+const turn21a = processIntelligentTurn([
+  { role: "user", content: "Please cancel ORD-103" },
+]);
+assert(
+  turn21a.reply.toLowerCase().includes("eligible for cancellation") &&
+  turn21a.reply.toLowerCase().includes("would you like me to"),
+  "21a. Cancel ORD-103 (Asks for customer confirmation before cancelling, does not cancel yet)"
+);
+
+const turn21b = processIntelligentTurn([
+  { role: "user", content: "Please cancel ORD-103" },
+  { role: "assistant", content: "Order ORD-103 is currently being processed and is eligible for cancellation. Would you like me to go ahead and cancel it for you?" },
+  { role: "user", content: "Yes, please cancel it" },
+]);
+assert(
+  turn21b.reply.toLowerCase().includes("has been cancelled successfully") &&
+  turn21b.reply.toLowerCase().includes("ord-103"),
+  "21b. Customer confirms cancellation (Calls cancel_order and confirms successful cancellation)"
+);
+
+// 22. Negative Cancellation: Shipped Order (ORD-105)
+console.log("\n--- Negative Cancellation Test: Shipped Order (ORD-105) ---");
+const turn22 = processIntelligentTurn([
+  { role: "user", content: "Can I cancel ORD-105?" },
+]);
+assert(
+  turn22.reply.toLowerCase().includes("already shipped") &&
+  turn22.reply.toLowerCase().includes("cannot be cancelled"),
+  "22. Cancel Shipped ORD-105 (Rejects cancellation because already shipped)"
+);
+
+// 23. Negative Cancellation: Out for Delivery (ORD-101)
+console.log("\n--- Negative Cancellation Test: Out for Delivery (ORD-101) ---");
+const turn23 = processIntelligentTurn([
+  { role: "user", content: "Cancel order 101" },
+]);
+assert(
+  turn23.reply.toLowerCase().includes("cannot be cancelled") &&
+  turn23.reply.toLowerCase().includes("refuse"),
+  "23. Cancel Out for Delivery ORD-101 (Rejects cancellation, advises doorstep refusal)"
+);
+
+// 24. Negative Cancellation: Already Cancelled (ORD-110)
+console.log("\n--- Negative Cancellation Test: Already Cancelled (ORD-110) ---");
+const turn24 = processIntelligentTurn([
+  { role: "user", content: "I want to cancel ORD-110" },
+]);
+assert(
+  turn24.reply.toLowerCase().includes("already been cancelled"),
+  "24. Cancel Already Cancelled ORD-110 (States already cancelled)"
+);
+
+// 25. Cancellation Confirmation Declined (ORD-104)
+console.log("\n--- Cancellation Declined Test (ORD-104) ---");
+const turn25 = processIntelligentTurn([
+  { role: "user", content: "Cancel ORD-104" },
+  { role: "assistant", content: "Order ORD-104 is currently being processed and is eligible for cancellation. Would you like me to go ahead and cancel it for you?" },
+  { role: "user", content: "No, don't cancel it" },
+]);
+assert(
+  turn25.reply.toLowerCase().includes("not cancelled") &&
+  turn25.reply.toLowerCase().includes("continue processing"),
+  "25. Customer declines cancellation (Cancellation aborted, processing continues)"
+);
+
+// 26. Delivery Address Query (ORD-101)
+console.log("\n--- Delivery Address Query Test (ORD-101) ---");
+const turn26 = processIntelligentTurn([
+  { role: "user", content: "Where will ORD-101 be delivered?" },
+]);
+assert(
+  turn26.reply.toLowerCase().includes("indiranagar") &&
+  turn26.reply.toLowerCase().includes("bengaluru") &&
+  turn26.reply.toLowerCase().includes("560038"),
+  "26. Where will ORD-101 be delivered? (Returns correct street address, city, and pincode)"
+);
+
+// 27. Delivery Address Query (ORD-103)
+console.log("\n--- Delivery Address Query Test (ORD-103) ---");
+const turn27 = processIntelligentTurn([
+  { role: "user", content: "What is the delivery address for ORD-103?" },
+]);
+assert(
+  turn27.reply.toLowerCase().includes("churchgate") &&
+  turn27.reply.toLowerCase().includes("mumbai") &&
+  turn27.reply.toLowerCase().includes("400020"),
+  "27. Delivery address for ORD-103 (Returns Mumbai address and pincode)"
+);
+
+// 28. Order Contents Query (ORD-104)
+console.log("\n--- Order Contents Query Test (ORD-104) ---");
+const turn28 = processIntelligentTurn([
+  { role: "user", content: "What did I order in ORD-104?" },
+]);
+assert(
+  turn28.reply.toLowerCase().includes("niacinamide") &&
+  turn28.reply.toLowerCase().includes("night cream"),
+  "28. What did I order in ORD-104? (Lists item contents accurately)"
+);
+
+// 29. Payment Method Query (ORD-106)
+console.log("\n--- Payment Details Query Test (ORD-106) ---");
+const turn29 = processIntelligentTurn([
+  { role: "user", content: "How did I pay for ORD-106?" },
+]);
+assert(
+  turn29.reply.toLowerCase().includes("cash on delivery"),
+  "29. How did I pay for ORD-106? (Identifies Cash on Delivery payment method)"
+);
+
+// 30. Hinglish Natural Question
+console.log("\n--- Hinglish Natural Question Test ---");
+const turn30 = processIntelligentTurn([
+  { role: "user", content: "mera order kab ayega" },
+]);
+assert(
+  turn30.reply.toLowerCase().includes("order id") ||
+  turn30.reply.toLowerCase().includes("batayein"),
+  "30. mera order kab ayega (Natural Hinglish understanding asks for Order ID politely)"
+);
+
 console.log("\n===============================================================");
 console.log(`FINAL RESULTS: ${passedCount} / ${totalCount} CONVERSATIONS PASSED`);
 console.log("===============================================================");

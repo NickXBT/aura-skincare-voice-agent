@@ -47,6 +47,13 @@ export function extractEntities(query: string): ExtractedEntities {
     if (/\b(one zero one|won won won|all day one zero one)\b/i.test(norm)) orderId = "ORD-101";
     else if (/\b(one zero two)\b/i.test(norm)) orderId = "ORD-102";
     else if (/\b(one zero three)\b/i.test(norm)) orderId = "ORD-103";
+    else if (/\b(one zero four)\b/i.test(norm)) orderId = "ORD-104";
+    else if (/\b(one zero five)\b/i.test(norm)) orderId = "ORD-105";
+    else if (/\b(one zero six)\b/i.test(norm)) orderId = "ORD-106";
+    else if (/\b(one zero seven)\b/i.test(norm)) orderId = "ORD-107";
+    else if (/\b(one zero eight)\b/i.test(norm)) orderId = "ORD-108";
+    else if (/\b(one zero nine)\b/i.test(norm)) orderId = "ORD-109";
+    else if (/\b(one one zero|one ten)\b/i.test(norm)) orderId = "ORD-110";
     else if (/\b(nine nine nine)\b/i.test(norm)) orderId = "ORD-999";
   }
 
@@ -55,15 +62,36 @@ export function extractEntities(query: string): ExtractedEntities {
   if (/\bpriya\b/i.test(norm)) customerName = "Priya Sharma";
   else if (/\brahul\b/i.test(norm)) customerName = "Rahul Verma";
   else if (/\bananya\b/i.test(norm)) customerName = "Ananya Patel";
+  else if (/\bvikram\b/i.test(norm)) customerName = "Vikram Singhania";
+  else if (/\bsneha\b/i.test(norm)) customerName = "Sneha Kapoor";
+  else if (/\brohan\b/i.test(norm)) customerName = "Rohan Gupta";
+  else if (/\bmeera\b/i.test(norm)) customerName = "Meera Nair";
+  else if (/\baditya\b/i.test(norm)) customerName = "Aditya Joshi";
+  else if (/\bpooja\b/i.test(norm)) customerName = "Pooja Deshmukh";
+  else if (/\bkabir\b/i.test(norm)) customerName = "Kabir Mehta";
 
   // 3. Product Extraction
   let product: string | null = null;
-  if (/serum|vitamin c/i.test(norm)) {
+  if (/vitamin c serum/i.test(norm) || (norm.includes("serum") && !norm.includes("niacinamide"))) {
     product = "Vitamin C Serum (30ml)";
   } else if (/sunscreen|spf/i.test(norm)) {
     product = "Hydrating Sunscreen SPF 50";
-  } else if (/face wash|toner|green tea/i.test(norm)) {
+  } else if (/face wash|balancing toner|green tea/i.test(norm)) {
     product = "Green Tea Face Wash + Toner";
+  } else if (/niacinamide|night cream/i.test(norm)) {
+    product = "Niacinamide Serum + Night Cream";
+  } else if (/rose water|cleansing balm/i.test(norm)) {
+    product = "Rose Water Mist + Cleansing Balm";
+  } else if (/ceramide/i.test(norm)) {
+    product = "Ceramide Barrier Repair Cream";
+  } else if (/face scrub/i.test(norm)) {
+    product = "Vitamin C Brightening Face Scrub";
+  } else if (/salicylic/i.test(norm)) {
+    product = "Salicylic Acid 2% Toner";
+  } else if (/eye gel/i.test(norm)) {
+    product = "Peptide Eye Gel + Sunscreen Stick";
+  } else if (/kumkumadi/i.test(norm)) {
+    product = "Kumkumadi Glow Facial Oil";
   }
 
   // 4. Monetary Amount Extraction
@@ -71,8 +99,8 @@ export function extractEntities(query: string): ExtractedEntities {
   const amountMatch = norm.match(/(?:₹|rs\.?|rupees?)?\s*(\d{2,5})\s*(?:rupees?|rs\.?)?/i);
   if (amountMatch && amountMatch[1]) {
     const parsed = parseInt(amountMatch[1], 10);
-    // Avoid confusing 101, 102, 103 with order amounts unless explicitly qualified
-    if (parsed > 300 && parsed !== 999) {
+    // Avoid confusing 101, 102, 103, 104... 110 with order amounts unless explicitly qualified
+    if (parsed > 300 && (parsed < 101 || parsed > 110) && parsed !== 999) {
       amount = parsed;
     }
   }

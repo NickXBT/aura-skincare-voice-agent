@@ -10,6 +10,8 @@ export interface ResolvedContext {
   lastIntent: string | null;
   awaitingField: "ORDER_ID" | null;
   isSwitchingOrder: boolean;
+  awaitingCancellationConfirmation: boolean;
+  pendingCancelOrderId: string | null;
 }
 
 /**
@@ -25,6 +27,8 @@ export function resolveConversationContext(
   let lastIntent: string | null = null;
   let awaitingField: "ORDER_ID" | null = null;
   let isSwitchingOrder = false;
+  let awaitingCancellationConfirmation = false;
+  let pendingCancelOrderId: string | null = null;
 
   const lastUserMsg = [...messages].reverse().find((m) => m.role === "user");
   const query = lastUserMsg?.content.toLowerCase() || "";
@@ -33,6 +37,26 @@ export function resolveConversationContext(
   if (/\b(other order|another order|different order|dusra order|other one)\b/i.test(query)) {
     isSwitchingOrder = true;
     activeOrderId = null;
+  }
+
+  // Detect if previous assistant message asked for cancellation confirmation
+  const lastAssistantMsg = [...messages].reverse().find((m) => m.role === "assistant");
+  if (lastAssistantMsg) {
+    const text = lastAssistantMsg.content.toLowerCase();
+    if (
+      text.includes("would you like me to cancel") ||
+      text.includes("would you like me to go ahead and cancel") ||
+      text.includes("confirm cancellation") ||
+      text.includes("eligible for cancellation. would you like") ||
+      text.includes("eligible for cancellation. should i") ||
+      text.includes("cancel it for you")
+    ) {
+      awaitingCancellationConfirmation = true;
+      const match = lastAssistantMsg.content.match(/(?:ORD[- ]?)?(\d{3})/i);
+      if (match && match[1]) {
+        pendingCancelOrderId = `ORD-${match[1]}`;
+      }
+    }
   }
 
   // If no order ID extracted directly from current query, scan previous turns in reverse
@@ -45,6 +69,11 @@ export function resolveConversationContext(
         break;
       }
     }
+  }
+
+  // If still no active order ID but pending cancellation exists, inherit it
+  if (!activeOrderId && pendingCancelOrderId) {
+    activeOrderId = pendingCancelOrderId;
   }
 
   // Cross-reference customer name to mock database
@@ -61,14 +90,21 @@ export function resolveConversationContext(
 
   // Cross-reference product to mock database if user says "my sunscreen", "the serum", etc.
   if (!activeOrderId && product && !isSwitchingOrder) {
-    if (product.includes("Serum")) activeOrderId = "ORD-101";
-    else if (product.includes("Sunscreen")) activeOrderId = "ORD-102";
-    else if (product.includes("Face Wash")) activeOrderId = "ORD-103";
+    if (product.includes("Serum") && !product.includes("Niacinamide")) activeOrderId = "ORD-101";
+    else if (product.includes("Sunscreen") && !product.includes("Stick")) activeOrderId = "ORD-102";
+    else if (product.includes("Face Wash") || product.includes("Balancing Toner")) activeOrderId = "ORD-103";
+    else if (product.includes("Niacinamide") || product.includes("Night Cream")) activeOrderId = "ORD-104";
+    else if (product.includes("Rose Water") || product.includes("Cleansing Balm")) activeOrderId = "ORD-105";
+    else if (product.includes("Ceramide")) activeOrderId = "ORD-106";
+    else if (product.includes("Face Scrub")) activeOrderId = "ORD-107";
+    else if (product.includes("Salicylic")) activeOrderId = "ORD-108";
+    else if (product.includes("Eye Gel") || product.includes("Sunscreen Stick")) activeOrderId = "ORD-109";
+    else if (product.includes("Kumkumadi")) activeOrderId = "ORD-110";
   }
 
   // Cross-reference timeframe: "the order I bought yesterday" or "3 hours ago"
   if (!activeOrderId && currentEntities.timeframeDescription && !isSwitchingOrder) {
-    if (currentEntities.timeframeDescription === "yesterday" || currentEntities.timeframeDescription === "today") {
+    if (currentEntities.timeframeDescription === "yesterday" || currentEntities.timeframeDescription === "today" || currentEntities.timeframeDescription === "3 hours ago") {
       activeOrderId = "ORD-103"; // Ordered 3 hours ago
     }
   }
@@ -88,5 +124,7 @@ export function resolveConversationContext(
     lastIntent,
     awaitingField,
     isSwitchingOrder,
+    awaitingCancellationConfirmation,
+    pendingCancelOrderId: pendingCancelOrderId || activeOrderId,
   };
 }

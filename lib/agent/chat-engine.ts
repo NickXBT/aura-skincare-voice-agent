@@ -1,5 +1,11 @@
 import { ARIA_SYSTEM_PROMPT } from "@/lib/agent/system-prompt";
-import { executeGetOrderDetails, ORDER_TOOL_DEFINITION, ToolCallResult } from "@/lib/tools/order-tool";
+import {
+  executeGetOrderDetails,
+  executeCancelOrder,
+  ORDER_TOOL_DEFINITION,
+  CANCEL_ORDER_TOOL_DEFINITION,
+  ToolCallResult,
+} from "@/lib/tools/order-tool";
 import { normalizeOrderId, getOrderById } from "@/lib/orders/database";
 import { executePipeline, PipelineResult } from "@/lib/agent/pipeline";
 import { DetectedIntent } from "@/lib/agent/intent-classifier";
@@ -63,7 +69,7 @@ export function extractConversationMemory(messages: Message[]): ConversationMemo
   let awaitingOrderIdFor: "tracking" | "cancellation" | "return" | null = null;
   let isHinglish = false;
 
-  const hinglishTokens = /\b(kahan|kaha|kab|kya|hai|haan|ji|bhai|mera|meri|nahi|aaya|aayega|kar do|kardo|karo|batao|shukriya|dhanyawaad)\b/i;
+  const hinglishTokens = /\b(kahan|kaha|kab|kya|hai|haan|ji|bhai|mera|meri|nahi|nahin|aaya|aayega|kar do|kardo|karo|batao|shukriya|dhanyawaad)\b/i;
 
   for (const m of messages) {
     if (m.role === "user" && hinglishTokens.test(m.content)) {
@@ -83,15 +89,36 @@ export function extractConversationMemory(messages: Message[]): ConversationMemo
       }
     }
 
-    if (m.content.match(/vitamin c|serum/i)) {
+    if (m.content.match(/vitamin c serum/i) || (m.content.match(/serum/i) && !m.content.match(/niacinamide/i))) {
       activeProduct = "Vitamin C Serum (30ml)";
       if (!activeOrderId) activeOrderId = "ORD-101";
-    } else if (m.content.match(/sunscreen|spf/i)) {
+    } else if (m.content.match(/sunscreen/i) && !m.content.match(/stick/i)) {
       activeProduct = "Hydrating Sunscreen SPF 50";
       if (!activeOrderId) activeOrderId = "ORD-102";
     } else if (m.content.match(/green tea|face wash|toner/i)) {
       activeProduct = "Green Tea Face Wash + Toner";
       if (!activeOrderId) activeOrderId = "ORD-103";
+    } else if (m.content.match(/niacinamide/i)) {
+      activeProduct = "Niacinamide Serum + Night Cream";
+      if (!activeOrderId) activeOrderId = "ORD-104";
+    } else if (m.content.match(/rose water/i)) {
+      activeProduct = "Rose Water Mist + Cleansing Balm";
+      if (!activeOrderId) activeOrderId = "ORD-105";
+    } else if (m.content.match(/ceramide/i)) {
+      activeProduct = "Ceramide Barrier Repair Cream";
+      if (!activeOrderId) activeOrderId = "ORD-106";
+    } else if (m.content.match(/face scrub/i)) {
+      activeProduct = "Vitamin C Brightening Face Scrub";
+      if (!activeOrderId) activeOrderId = "ORD-107";
+    } else if (m.content.match(/salicylic/i)) {
+      activeProduct = "Salicylic Acid 2% Toner";
+      if (!activeOrderId) activeOrderId = "ORD-108";
+    } else if (m.content.match(/eye gel/i)) {
+      activeProduct = "Peptide Eye Gel + Sunscreen Stick";
+      if (!activeOrderId) activeOrderId = "ORD-109";
+    } else if (m.content.match(/kumkumadi/i)) {
+      activeProduct = "Kumkumadi Glow Facial Oil";
+      if (!activeOrderId) activeOrderId = "ORD-110";
     }
   }
 
@@ -184,7 +211,7 @@ async function callGeminiWithTools(messages: Message[], apiKey: string): Promise
     contents,
     tools: [
       {
-        function_declarations: [ORDER_TOOL_DEFINITION],
+        function_declarations: [ORDER_TOOL_DEFINITION, CANCEL_ORDER_TOOL_DEFINITION],
       },
     ],
     generationConfig: {
@@ -246,6 +273,49 @@ async function callGeminiWithTools(messages: Message[], apiKey: string): Promise
             reply: text.trim(),
             toolCallsExecuted,
             detectedIntent: "ORDER_TRACKING",
+            providerUsed: "gemini",
+          };
+        }
+      }
+    } else if (fn.name === "cancel_order") {
+      const orderId = fn.args?.order_id || memory.activeOrderId || "";
+      const toolRes = executeCancelOrder(orderId);
+      toolCallsExecuted.push(toolRes);
+
+      const followUpContents = [
+        ...contents,
+        { role: "model", parts: [{ functionCall: fn }] },
+        {
+          role: "user",
+          parts: [
+            {
+              functionResponse: {
+                name: "cancel_order",
+                response: { output: toolRes.message },
+              },
+            },
+          ],
+        },
+      ];
+
+      const followUpRes = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          system_instruction: { parts: [{ text: ARIA_SYSTEM_PROMPT }] },
+          contents: followUpContents,
+          generationConfig: { temperature: 0.3, maxOutputTokens: 200 },
+        }),
+      });
+
+      if (followUpRes.ok) {
+        const followUpData = await followUpRes.json();
+        const text = followUpData.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (text) {
+          return {
+            reply: text.trim(),
+            toolCallsExecuted,
+            detectedIntent: "CANCELLATION",
             providerUsed: "gemini",
           };
         }

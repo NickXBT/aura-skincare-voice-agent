@@ -135,6 +135,19 @@ export function evaluateCancellationPolicy(
     };
   }
 
+  // Cancelled
+  if (order?.status === "Cancelled") {
+    const response = isHinglish
+      ? `Order ${order.id} pehle hi cancel ho chuka hai aur refund initiate ho chuka hai.`
+      : `Order ${order.id} has already been cancelled and refund has been initiated.`;
+    return {
+      allowed: false,
+      policyName: "CANCELLATION",
+      reason: "Order is already cancelled.",
+      response,
+    };
+  }
+
   // Shipped
   if (order?.status === "Shipped") {
     const response = isHinglish

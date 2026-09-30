@@ -8,7 +8,7 @@ import {
   evaluateCodPolicy,
   evaluateDeliveryTimePolicy,
 } from "@/lib/agent/policy-engine";
-import { executeGetOrderDetails, ToolCallResult } from "@/lib/tools/order-tool";
+import { executeGetOrderDetails, executeCancelOrder, ToolCallResult } from "@/lib/tools/order-tool";
 import { Message } from "@/lib/agent/chat-engine";
 
 export interface PipelineResult {
@@ -31,7 +31,7 @@ export interface PipelineResult {
 /**
  * ARIA Conversational Reasoning Pipeline:
  * UNDERSTAND -> REASON -> VERIFY -> APPLY POLICY -> RESPOND
- * Covers 1,000+ customer question variations across 45 intents.
+ * Covers 1,000+ customer question variations across 48 intents and 10 realistic orders.
  */
 export function executePipeline(messages: Message[]): PipelineResult {
   const startTime = Date.now();
@@ -41,11 +41,14 @@ export function executePipeline(messages: Message[]): PipelineResult {
   // 1. Entity Extraction (with self-correction and spoken digits)
   const entities = extractEntities(rawQuery);
 
-  // 2. Context Resolution (multi-turn memory & cross-referencing)
+  // 2. Context Resolution (multi-turn memory, pronoun resolution & cross-referencing)
   const context = resolveConversationContext(messages, entities);
 
   // 3. Intent Classification
-  const classification = classifyIntent(rawQuery, { activeOrderId: context.activeOrderId });
+  const classification = classifyIntent(rawQuery, {
+    activeOrderId: context.activeOrderId,
+    awaitingConfirmation: context.awaitingCancellationConfirmation,
+  });
   const intent = classification.intent;
   const isHinglish = classification.isHinglish;
 
@@ -84,7 +87,40 @@ export function executePipeline(messages: Message[]): PipelineResult {
       : "I understand your frustration and apologize for the inconvenience. Please share your Order ID and I will check your delivery status or arrange a resolution immediately.";
   }
 
-  // 4. REPETITION & REPHRASING
+  // 4. CONFIRMATION OF ACTION (Explicit cancellation execution)
+  else if (intent === "CONFIRM_ACTION") {
+    const targetOrderId = context.pendingCancelOrderId || context.activeOrderId;
+    if (context.awaitingCancellationConfirmation && targetOrderId) {
+      toolRequired = "YES";
+      toolUsed = "cancel_order";
+      const cancelRes = executeCancelOrder(targetOrderId);
+      toolCallsExecuted.push(cancelRes);
+
+      if (cancelRes.found && cancelRes.order) {
+        decision = "CANCEL_ORDER_SUCCESS";
+        reply = isHinglish
+          ? `Done. Aapka order ${targetOrderId} successfully cancel kar diya gaya hai. Refund 5 se 7 business days mein aapke account mein credit ho jayega.`
+          : `Done. Your order ${targetOrderId} has been cancelled successfully. Any online payment will be refunded to your original payment method within 5 to 7 business days.`;
+      } else {
+        decision = "CANCEL_ORDER_FAILED";
+        reply = cancelRes.message;
+      }
+    } else {
+      reply = isHinglish
+        ? "Samajh gaya. Kya main aapke kisi order ya inquiry mein madad karoon?"
+        : "Understood! How can I assist you with your Aura Skincare order today?";
+    }
+  }
+
+  // 5. DECLINE OF ACTION
+  else if (intent === "DECLINE_ACTION") {
+    decision = "DECLINE_ACTION_ACKNOWLEDGED";
+    reply = isHinglish
+      ? "Theek hai, maine cancellation cancel nahi kiya. Aapka order normal process hota rahega."
+      : "Understood. I have not cancelled your order. It will continue processing as normal.";
+  }
+
+  // 6. REPETITION & REPHRASING
   else if (intent === "REPETITION_REQUEST") {
     decision = "REPEAT_LAST_TURN";
     const lastAssistantMsg = [...messages].reverse().find((m) => m.role === "assistant");
@@ -99,7 +135,7 @@ export function executePipeline(messages: Message[]): PipelineResult {
       : "In short: we offer free shipping over ₹499, a 7-day unopened return policy, and orders can only be cancelled before they leave our warehouse.";
   }
 
-  // 5. GREETING
+  // 7. GREETING
   else if (intent === "GREETING") {
     decision = "GREET_CUSTOMER";
     reply = isHinglish
@@ -107,7 +143,7 @@ export function executePipeline(messages: Message[]): PipelineResult {
       : "Hi! I'm ARIA from Aura Skincare. How can I help you today?";
   }
 
-  // 6. THANKS & GOODBYE
+  // 8. THANKS & GOODBYE
   else if (intent === "THANKS") {
     decision = "ACKNOWLEDGE_THANKS";
     reply = isHinglish
@@ -121,7 +157,7 @@ export function executePipeline(messages: Message[]): PipelineResult {
       : "Thank you for reaching out to Aura Skincare. Have a wonderful day!";
   }
 
-  // 7. RETURNED ORDER LOOKUP
+  // 9. RETURNED ORDER LOOKUP
   else if (intent === "RETURNED_ORDER_LOOKUP") {
     orderRequired = "YES";
     decision = "LOOKUP_RETURNED_ORDERS";
@@ -130,7 +166,7 @@ export function executePipeline(messages: Message[]): PipelineResult {
       : "I don't see a returned order in the available records. If you have the order ID, give it to me and I'll check it.";
   }
 
-  // 8. DAMAGED / DEFECTIVE / WRONG / MISSING PRODUCT
+  // 10. DAMAGED / DEFECTIVE / WRONG / MISSING PRODUCT
   else if (intent === "DAMAGED_PRODUCT" || intent === "DEFECTIVE_PRODUCT") {
     policyRequired = "YES";
     decision = "CHECK_POLICY_DAMAGE";
@@ -147,7 +183,7 @@ export function executePipeline(messages: Message[]): PipelineResult {
       : "If you received the wrong item or an item was missing, please share your Order ID and photo proof so we can dispatch the correct product immediately.";
   }
 
-  // 9. REFUND / MONEY BACK
+  // 11. REFUND / MONEY BACK
   else if (intent === "REFUND") {
     policyRequired = "YES";
     decision = "REFUND_POLICY";
@@ -156,7 +192,7 @@ export function executePipeline(messages: Message[]): PipelineResult {
       : "Under our refund policy, returns within our 7-day window or approved cancellations have their refunds processed back to your original payment method within 5 to 7 business days.";
   }
 
-  // 10. REFUSING DELIVERY
+  // 12. REFUSING DELIVERY
   else if (intent === "REFUSING_DELIVERY") {
     policyRequired = "YES";
     decision = "REFUSE_DELIVERY_INSTRUCTION";
@@ -165,7 +201,7 @@ export function executePipeline(messages: Message[]): PipelineResult {
       : "Yes, if your order is already out for delivery and you no longer wish to receive it, you can simply refuse the delivery at your doorstep.";
   }
 
-  // 11. RETURN WINDOW & CONDITIONS
+  // 13. RETURN WINDOW & CONDITIONS
   else if (intent === "RETURN_WINDOW") {
     policyRequired = "YES";
     decision = "ANSWER_RETURN_WINDOW";
@@ -181,7 +217,7 @@ export function executePipeline(messages: Message[]): PipelineResult {
       : "To qualify for a return, the product must be completely unopened, unused, and in its original intact packaging. Opened or used items are not returnable.";
   }
 
-  // 12. GENERAL RETURN POLICY
+  // 14. GENERAL RETURN POLICY
   else if (intent === "RETURN_POLICY") {
     policyRequired = "YES";
     decision = "ANSWER_RETURN_POLICY";
@@ -190,7 +226,7 @@ export function executePipeline(messages: Message[]): PipelineResult {
       : "Returns are accepted within 7 days of delivery if the product is unopened, unused, and in its original packaging.";
   }
 
-  // 13. RETURN ELIGIBILITY & RETURN REQUEST
+  // 15. RETURN ELIGIBILITY & RETURN REQUEST
   else if (intent === "RETURN_ELIGIBILITY" || intent === "RETURN_REQUEST") {
     policyRequired = "YES";
     decision = "EVALUATE_RETURN_POLICY";
@@ -200,7 +236,7 @@ export function executePipeline(messages: Message[]): PipelineResult {
     reply = policyResult.response;
   }
 
-  // 14. CANCELLATION & CANCELLATION ELIGIBILITY
+  // 16. CANCELLATION & CANCELLATION ELIGIBILITY
   else if (intent === "CANCELLATION" || intent === "CANCELLATION_ELIGIBILITY") {
     orderRequired = "YES";
 
@@ -225,7 +261,59 @@ export function executePipeline(messages: Message[]): PipelineResult {
     }
   }
 
-  // 15. ORDER ID MISSING / UNKNOWN
+  // 17. DELIVERY ADDRESS
+  else if (intent === "DELIVERY_ADDRESS") {
+    orderRequired = "YES";
+    const targetId = context.activeOrderId || (entities.orderId ? entities.orderId : null);
+    if (targetId) {
+      toolRequired = "YES";
+      toolUsed = "get_order_details";
+      const toolRes = executeGetOrderDetails(targetId);
+      toolCallsExecuted.push(toolRes);
+
+      if (toolRes.found && toolRes.order) {
+        const o = toolRes.order;
+        decision = "PROVIDE_DELIVERY_ADDRESS";
+        reply = isHinglish
+          ? `Order ${o.id} is address par deliver hoga: ${o.delivery_address}, ${o.city} - ${o.pincode}.`
+          : `Order ${o.id} will be delivered to: ${o.delivery_address}, ${o.city} - ${o.pincode}.`;
+      } else {
+        reply = toolRes.message;
+      }
+    } else {
+      reply = isHinglish
+        ? "Delivery address check karne ke liye kripya apna Order ID batayein (jaise ORD-101)."
+        : "Please share your order ID (such as ORD-101) so I can verify the delivery address.";
+    }
+  }
+
+  // 18. PAYMENT INFORMATION
+  else if (intent === "PAYMENT_INFORMATION") {
+    orderRequired = "YES";
+    const targetId = context.activeOrderId || (entities.orderId ? entities.orderId : null);
+    if (targetId) {
+      toolRequired = "YES";
+      toolUsed = "get_order_details";
+      const toolRes = executeGetOrderDetails(targetId);
+      toolCallsExecuted.push(toolRes);
+
+      if (toolRes.found && toolRes.order) {
+        const o = toolRes.order;
+        decision = "PROVIDE_PAYMENT_INFO";
+        reply = isHinglish
+          ? `Order ${o.id} ka payment method ${o.payment_method} hai (status: ${o.payment_status}), aur total amount ${o.value} hai.`
+          : `Order ${o.id} was placed via ${o.payment_method} (status: ${o.payment_status}) for a total of ${o.value}.`;
+      } else {
+        reply = toolRes.message;
+      }
+    } else {
+      reply = isHinglish
+        ? "Payment details check karne ke liye kripya apna Order ID batayein (jaise ORD-101)."
+        : "Please share your Order ID (such as ORD-101) so I can check your payment details.";
+    }
+  }
+
+  // 19. ORDER ID MISSING / UNKNOWN
   else if (intent === "MISSING_ORDER_ID" || intent === "ORDER_ID_MISSING") {
     decision = "ADVISE_LOCATE_ID";
     reply = isHinglish
@@ -233,7 +321,7 @@ export function executePipeline(messages: Message[]): PipelineResult {
       : "No worries! You can locate your order ID in your order confirmation SMS or email (format: ORD-101). Alternatively, let me know your registered name.";
   }
 
-  // 16. COURIER INFORMATION & TRACKING NUMBER
+  // 20. COURIER INFORMATION & TRACKING NUMBER
   else if (intent === "COURIER_INFORMATION" || intent === "TRACKING_NUMBER") {
     orderRequired = "YES";
     if (context.activeOrderId) {
@@ -267,7 +355,7 @@ export function executePipeline(messages: Message[]): PipelineResult {
     }
   }
 
-  // 17. DELIVERY ETA & TIME
+  // 21. DELIVERY ETA & TIME
   else if (intent === "DELIVERY_TIME") {
     policyRequired = "YES";
     const timePolicy = evaluateDeliveryTimePolicy(isHinglish);
@@ -287,14 +375,22 @@ export function executePipeline(messages: Message[]): PipelineResult {
           reply = isHinglish
             ? `Aapka Order ${o.id} (${o.product}) out for delivery hai aur aaj ${o.expectedDelivery || "shaam 6 baje tak"} deliver ho jayega.`
             : `Your order for the ${o.product} (${o.id}) is out for delivery with ${o.courier} and expected by ${o.expectedDelivery || "6 PM today"}.`;
+        } else if (o.status === "Shipped") {
+          reply = isHinglish
+            ? `Order ${o.id} (${o.product}) dispatch ho chuka hai via ${o.courier} aur ${o.expectedDelivery || "jald"} deliver ho jayega.`
+            : `Order ${o.id} for the ${o.product} has shipped via ${o.courier} and is expected ${o.expectedDelivery || "soon"}.`;
         } else if (o.status === "Delivered") {
           reply = isHinglish
             ? `Order ${o.id} ${o.deliveredAgo || "pehle"} hi deliver ho chuka hai.`
             : `Order ${o.id} for the ${o.product} was already delivered ${o.deliveredAgo}.`;
         } else if (o.status === "Processing") {
           reply = isHinglish
-            ? `Order ${o.id} abhi processing state mein hai (placed ${o.orderedAgo}). Normal delivery 3 se 5 din mein hoti hai.`
-            : `Order ${o.id} is currently processing (placed ${o.orderedAgo}). Standard delivery takes 3 to 5 business days.`;
+            ? `Order ${o.id} abhi processing state mein hai (placed ${o.orderedAgo || "recently"}). Normal delivery 3 se 5 din mein hoti hai.`
+            : `Order ${o.id} is currently processing (placed ${o.orderedAgo || "recently"}). Standard delivery takes 3 to 5 business days.`;
+        } else if (o.status === "Cancelled") {
+          reply = isHinglish
+            ? `Order ${o.id} cancel ho chuka hai.`
+            : `Order ${o.id} has already been cancelled.`;
         }
       } else {
         reply = toolRes.message;
@@ -306,21 +402,21 @@ export function executePipeline(messages: Message[]): PipelineResult {
     }
   }
 
-  // 18. COD / CASH ON DELIVERY
+  // 22. COD / CASH ON DELIVERY
   else if (intent === "COD") {
     policyRequired = "YES";
     const codEval = evaluateCodPolicy(entities.amount, isHinglish);
     reply = codEval.response;
   }
 
-  // 19. SHIPPING FEE & FREE SHIPPING
+  // 23. SHIPPING FEE & FREE SHIPPING
   else if (intent === "SHIPPING_FEE" || intent === "FREE_SHIPPING") {
     policyRequired = "YES";
     const shipEval = evaluateShippingFeePolicy(entities.amount, isHinglish);
     reply = shipEval.response;
   }
 
-  // 20. PRODUCT IN ORDER & ORDER AMOUNT
+  // 24. PRODUCT IN ORDER & ORDER AMOUNT
   else if (intent === "PRODUCT_IN_ORDER" || intent === "ORDER_AMOUNT") {
     orderRequired = "YES";
     if (context.activeOrderId) {
@@ -336,9 +432,10 @@ export function executePipeline(messages: Message[]): PipelineResult {
             ? `Order ${o.id} (${o.product}) ka total amount ${o.value} hai.`
             : `The total amount for Order ${o.id} (${o.product}) was ${o.value}.`;
         } else {
+          const itemsStr = o.items ? o.items.join(", ") : o.product;
           reply = isHinglish
-            ? `Order ${o.id} mein aapne ${o.product} order kiya tha (amount: ${o.value}).`
-            : `In Order ${o.id}, you ordered the ${o.product} for ${o.value}.`;
+            ? `Order ${o.id} mein yeh items hain: ${itemsStr} (total: ${o.value}).`
+            : `Order ${o.id} contains: ${itemsStr} (total: ${o.value}).`;
         }
       } else {
         reply = toolRes.message;
@@ -350,7 +447,7 @@ export function executePipeline(messages: Message[]): PipelineResult {
     }
   }
 
-  // 21. ORDER STATUS / ORDER TRACKING / ORDER CONFIRMATION / ORDER DETAILS
+  // 25. ORDER STATUS / ORDER TRACKING / ORDER CONFIRMATION / ORDER DETAILS
   else if (
     intent === "ORDER_STATUS" ||
     intent === "ORDER_TRACKING" ||
@@ -373,16 +470,24 @@ export function executePipeline(messages: Message[]): PipelineResult {
         const o = toolRes.order;
         if (o.status === "Out for Delivery") {
           reply = isHinglish
-            ? `Order ${o.id} (${o.product}) out for delivery hai BlueDart ke through aur aaj 6 PM tak deliver ho jayega.`
+            ? `Order ${o.id} (${o.product}) out for delivery hai ${o.courier} ke through aur aaj ${o.expectedDelivery || "6 PM tak"} deliver ho jayega.`
             : `Order ${o.id} for the ${o.product} is out for delivery with ${o.courier} and is expected by ${o.expectedDelivery || "6 PM today"}.`;
+        } else if (o.status === "Shipped") {
+          reply = isHinglish
+            ? `Order ${o.id} (${o.product}) dispatch ho chuka hai via ${o.courier} (Tracking: ${o.trackingNumber || o.tracking_id}) aur ${o.expectedDelivery || "jald"} deliver ho jayega.`
+            : `Order ${o.id} for the ${o.product} has been shipped via ${o.courier} (Tracking: ${o.trackingNumber || o.tracking_id}) and is expected ${o.expectedDelivery || "soon"}.`;
         } else if (o.status === "Delivered") {
           reply = isHinglish
-            ? `Order ${o.id} (${o.product}) ${o.deliveredAgo} deliver ho chuka hai via ${o.courier}.`
-            : `Order ${o.id} for the ${o.product} was delivered ${o.deliveredAgo} via ${o.courier}.`;
+            ? `Order ${o.id} (${o.product}) ${o.deliveredAgo || "recently"} deliver ho chuka hai via ${o.courier}.`
+            : `Order ${o.id} for the ${o.product} was delivered ${o.deliveredAgo || "recently"} via ${o.courier}.`;
         } else if (o.status === "Processing") {
           reply = isHinglish
-            ? `Order ${o.id} (${o.product}) abhi processing status mein hai (placed ${o.orderedAgo}). Yeh cancellation ke liye eligible hai.`
-            : `Order ${o.id} for the ${o.product} is currently processing (placed ${o.orderedAgo}) and is eligible for cancellation.`;
+            ? `Order ${o.id} (${o.product}) abhi processing status mein hai (placed ${o.orderedAgo || "recently"}). Yeh cancellation ke liye eligible hai.`
+            : `Order ${o.id} for the ${o.product} is currently processing (placed ${o.orderedAgo || "recently"}) and is eligible for cancellation.`;
+        } else if (o.status === "Cancelled") {
+          reply = isHinglish
+            ? `Order ${o.id} cancel ho chuka hai (payment status: ${o.payment_status}).`
+            : `Order ${o.id} has been cancelled (payment status: ${o.payment_status}).`;
         } else {
           reply = `Order ${o.id} status is ${o.status}.`;
         }
@@ -402,7 +507,7 @@ export function executePipeline(messages: Message[]): PipelineResult {
     }
   }
 
-  // 22. GENERAL AURA INFO & PRODUCT SUPPORT
+  // 26. GENERAL AURA INFO & PRODUCT SUPPORT
   else if (intent === "GENERAL_AURA_INFO" || intent === "PRODUCT_SUPPORT") {
     decision = "BRAND_INFO";
     reply = isHinglish
@@ -410,7 +515,7 @@ export function executePipeline(messages: Message[]): PipelineResult {
       : "Aura Skincare is an organic skincare brand offering clean, high-potency formulations including our Vitamin C Serum, Hydrating SPF 50 Sunscreen, and Green Tea Face Wash.";
   }
 
-  // 23. UNKNOWN / CLARIFICATION
+  // 27. UNKNOWN / CLARIFICATION
   else {
     decision = "REQUEST_CLARIFICATION";
     reply = isHinglish
