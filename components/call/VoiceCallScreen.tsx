@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Phone,
@@ -19,14 +19,21 @@ import {
   ArrowLeft,
   MessageSquare,
   AlertCircle,
-  Truck,
-  Package,
+  Activity,
+  Terminal,
 } from "lucide-react";
 import { AgentState } from "@/components/VoiceVisualizer";
 import { Message } from "@/lib/agent/chat-engine";
 import { CallIntelligenceReport } from "@/lib/agent/call-summary";
-import { ToolCallResult } from "@/lib/tools/order-tool";
-import { Order } from "@/lib/orders/database";
+
+export interface DiagnosticInfo {
+  micStatus: string;
+  permissionStatus: string;
+  sttStatus: string;
+  ttsStatus: string;
+  aiStatus: string;
+  currentState: string;
+}
 
 interface VoiceCallScreenProps {
   agentState: AgentState;
@@ -41,6 +48,9 @@ interface VoiceCallScreenProps {
   micAmplitude: number; // 0.0 - 1.0 real microphone volume
   postCallReport: CallIntelligenceReport | null;
   onStartNewCall: () => void;
+  interimTranscript?: string;
+  diagnosticInfo?: DiagnosticInfo;
+  ttsWarningMessage?: string | null;
 }
 
 export const VoiceCallScreen: React.FC<VoiceCallScreenProps> = ({
@@ -56,14 +66,20 @@ export const VoiceCallScreen: React.FC<VoiceCallScreenProps> = ({
   micAmplitude,
   postCallReport,
   onStartNewCall,
+  interimTranscript = "",
+  diagnosticInfo,
+  ttsWarningMessage,
 }) => {
   // Call controls
   const [isMuted, setIsMuted] = useState(false);
   const [isSpeakerMuted, setIsSpeakerMuted] = useState(false);
   const [showTranscript, setShowTranscript] = useState(true);
+  const [showDiagnostics, setShowDiagnostics] = useState(false);
   const [callDuration, setCallDuration] = useState(0);
   const [showJsonDetails, setShowJsonDetails] = useState(false);
   const [copiedJson, setCopiedJson] = useState(false);
+
+  const transcriptScrollRef = useRef<HTMLDivElement | null>(null);
 
   // Active call timer
   useEffect(() => {
@@ -77,6 +93,13 @@ export const VoiceCallScreen: React.FC<VoiceCallScreenProps> = ({
     }
     return () => clearInterval(timer);
   }, [isCallActive]);
+
+  // Auto-scroll transcript when new message arrives or user is speaking
+  useEffect(() => {
+    if (transcriptScrollRef.current) {
+      transcriptScrollRef.current.scrollTop = transcriptScrollRef.current.scrollHeight;
+    }
+  }, [messages, interimTranscript]);
 
   // Format MM:SS
   const formatTime = (seconds: number) => {
@@ -115,14 +138,28 @@ export const VoiceCallScreen: React.FC<VoiceCallScreenProps> = ({
                 ARIA
               </span>
               <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[#716A77] border-l border-[#E9E5EB] pl-2">
-                Aura Support
+                Aura Voice Support
               </span>
             </div>
           </div>
         </div>
 
-        {/* Live Call Duration / Status Pill */}
+        {/* Live Call Duration / Status Pill & Diagnostic toggle */}
         <div className="flex items-center gap-2">
+          {/* Diagnostics toggle */}
+          <button
+            onClick={() => setShowDiagnostics(!showDiagnostics)}
+            className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-mono font-medium border transition-colors cursor-pointer ${
+              showDiagnostics
+                ? "bg-[#4B2859] text-white border-[#4B2859]"
+                : "bg-white text-[#716A77] hover:text-[#17131A] border-[#E9E5EB]"
+            }`}
+            title="Toggle Audio Diagnostics Panel"
+          >
+            <Activity className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Diagnostics</span>
+          </button>
+
           {isCallActive ? (
             <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-mono font-medium shadow-2xs">
               <span className="w-2 h-2 rounded-full bg-emerald-600 animate-pulse" />
@@ -145,8 +182,53 @@ export const VoiceCallScreen: React.FC<VoiceCallScreenProps> = ({
         </div>
       </header>
 
+      {/* Developer Diagnostics Panel (Collapsible) */}
+      <AnimatePresence>
+        {showDiagnostics && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="overflow-hidden bg-[#17131A] text-white border-b border-zinc-800 text-xs font-mono px-6 py-3"
+          >
+            <div className="max-w-3xl mx-auto flex flex-wrap items-center justify-between gap-y-2 gap-x-6 text-[11px]">
+              <div className="flex items-center gap-1.5">
+                <span className="text-zinc-400">Microphone:</span>
+                <span className={diagnosticInfo?.micStatus.includes("Connected") ? "text-emerald-400 font-bold" : "text-amber-400"}>
+                  {diagnosticInfo?.micStatus || "Checking…"}
+                </span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-zinc-400">Permission:</span>
+                <span className={diagnosticInfo?.permissionStatus === "Granted" ? "text-emerald-400 font-bold" : "text-rose-400"}>
+                  {diagnosticInfo?.permissionStatus || "Pending"}
+                </span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-zinc-400">Speech Recognition:</span>
+                <span className={diagnosticInfo?.sttStatus.includes("Active") ? "text-emerald-400 font-bold" : "text-zinc-300"}>
+                  {diagnosticInfo?.sttStatus || "Idle"}
+                </span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-zinc-400">TTS Audio:</span>
+                <span className={diagnosticInfo?.ttsStatus.includes("Speaking") ? "text-purple-300 font-bold" : "text-emerald-400"}>
+                  {diagnosticInfo?.ttsStatus || "Ready"}
+                </span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-zinc-400">State:</span>
+                <span className="px-2 py-0.5 rounded bg-zinc-800 text-white font-bold uppercase">
+                  {agentState}
+                </span>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* 2. Main Viewport */}
-      <main className="flex-1 max-w-3xl w-full mx-auto px-6 py-6 sm:py-10 flex flex-col items-center justify-center text-center">
+      <main className="flex-1 max-w-3xl w-full mx-auto px-6 py-6 sm:py-8 flex flex-col items-center justify-center text-center">
         {postCallReport && !isCallActive ? (
           /* ================= POST-CALL SUMMARY SCREEN ================= */
           <motion.div
@@ -311,7 +393,7 @@ export const VoiceCallScreen: React.FC<VoiceCallScreenProps> = ({
                 Talk with ARIA
               </h2>
               <p className="text-sm text-[#716A77] leading-relaxed max-w-sm">
-                Get help with your Aura Skincare order, delivery, returns, cancellations, and products through a natural spoken conversation.
+                Get help with your Aura Skincare order status, cancellation, returns, delivery address, and products through a real spoken voice conversation.
               </p>
             </div>
 
@@ -322,7 +404,7 @@ export const VoiceCallScreen: React.FC<VoiceCallScreenProps> = ({
                 <div className="space-y-1">
                   <p className="font-semibold">{permissionError}</p>
                   <p className="text-[11px] text-rose-700">
-                    Microphone access is needed to talk with ARIA. Please check browser permissions and click Start Call again.
+                    Microphone access is needed to speak with ARIA. Please ensure your browser allows microphone access and click Start Call again.
                   </p>
                 </div>
               </div>
@@ -365,15 +447,15 @@ export const VoiceCallScreen: React.FC<VoiceCallScreenProps> = ({
                 Connecting to ARIA…
               </h3>
               <p className="text-xs text-[#716A77]">
-                Initializing browser microphone and speech recognition
+                Requesting microphone permission &amp; initializing speech recognition
               </p>
             </div>
           </motion.div>
         ) : (
           /* ================= CONNECTED LIVE CALL ================= */
-          <div className="w-full flex flex-col items-center justify-center space-y-6">
+          <div className="w-full flex flex-col items-center justify-center space-y-5">
             {/* Living Voice Visual Indicator (Centerpiece driven by real amplitude) */}
-            <div className="relative w-52 h-52 sm:w-60 sm:h-60 flex items-center justify-center select-none">
+            <div className="relative w-44 h-44 sm:w-52 sm:h-52 flex items-center justify-center select-none">
               {/* Layer 1: Ambient Reactive Glow */}
               <motion.div
                 animate={{
@@ -397,7 +479,7 @@ export const VoiceCallScreen: React.FC<VoiceCallScreenProps> = ({
                     opacity: [0.5, 0.15, 0],
                   }}
                   transition={{ duration: 2.2, repeat: Infinity, ease: "easeOut" }}
-                  className="absolute w-44 h-44 rounded-full border border-[#4B2859]/25 pointer-events-none"
+                  className="absolute w-40 h-40 rounded-full border border-[#4B2859]/25 pointer-events-none"
                 />
               )}
 
@@ -413,7 +495,7 @@ export const VoiceCallScreen: React.FC<VoiceCallScreenProps> = ({
                       : "0 10px 30px rgba(23, 19, 26, 0.12)",
                 }}
                 transition={{ duration: 0.1 }}
-                className="relative z-10 w-28 h-28 sm:w-32 sm:h-32 rounded-full bg-gradient-to-br from-[#4B2859] via-[#32183F] to-[#1E0D27] flex items-center justify-center shadow-lg"
+                className="relative z-10 w-24 h-24 sm:w-28 sm:h-28 rounded-full bg-gradient-to-br from-[#4B2859] via-[#32183F] to-[#1E0D27] flex items-center justify-center shadow-lg"
               >
                 {/* Visualizer Inside Sphere */}
                 <AnimatePresence mode="wait">
@@ -442,7 +524,7 @@ export const VoiceCallScreen: React.FC<VoiceCallScreenProps> = ({
                       className="flex items-center gap-1 h-8"
                     >
                       {[0.4, 0.9, 1.3, 0.8, 1.1, 0.5].map((mult, i) => {
-                        const barHeight = Math.max(5, Math.min(26, micAmplitude * 32 * mult + 5));
+                        const barHeight = Math.max(5, Math.min(24, micAmplitude * 30 * mult + 5));
                         return (
                           <div
                             key={i}
@@ -471,8 +553,8 @@ export const VoiceCallScreen: React.FC<VoiceCallScreenProps> = ({
               <div className="flex items-center justify-center gap-2 text-sm font-semibold tracking-wide text-[#17131A]">
                 {agentState === "listening" ? (
                   <span className="flex items-center gap-1.5 text-emerald-700">
-                    <span className="w-2 h-2 rounded-full bg-emerald-600 animate-pulse" />
-                    Listening…
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-600 animate-pulse" />
+                    Listening to you…
                   </span>
                 ) : agentState === "thinking" ? (
                   <span className="flex items-center gap-1.5 text-[#716A77]">
@@ -490,32 +572,64 @@ export const VoiceCallScreen: React.FC<VoiceCallScreenProps> = ({
               </div>
               <p className="text-xs text-[#716A77]">
                 {agentState === "speaking"
-                  ? "Speak anytime to interrupt"
+                  ? "Speak anytime to interrupt (Barge-in active)"
                   : "Speak naturally into your microphone"}
               </p>
             </div>
 
-            {/* Current Conversational Turn Snippet */}
-            {latestMessage && (
-              <motion.div
-                key={latestMessage.content}
-                initial={{ opacity: 0, y: 6 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="max-w-lg px-4 py-2.5 rounded-2xl bg-white border border-[#E9E5EB] shadow-2xs text-xs sm:text-sm text-[#17131A] leading-relaxed"
-              >
-                <span className="font-semibold text-[11px] text-[#4B2859] uppercase tracking-wider block mb-0.5">
-                  {latestMessage.role === "user" ? "You asked:" : "ARIA:"}
-                </span>
-                &ldquo;{latestMessage.content}&rdquo;
-              </motion.div>
+            {/* TTS Warning Notice if audio failed */}
+            {ttsWarningMessage && (
+              <div className="p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-[11px] text-amber-800 flex items-center gap-2 max-w-md">
+                <AlertCircle className="w-3.5 h-3.5 shrink-0 text-amber-600" />
+                <span>{ttsWarningMessage}</span>
+              </div>
             )}
+
+            {/* Real-Time Live Transcript Section (Continuous) */}
+            <div className="w-full max-w-lg bg-white rounded-2xl border border-[#E9E5EB] shadow-2xs overflow-hidden text-left flex flex-col">
+              <div className="px-4 py-2 bg-[#FAF9FB] border-b border-[#E9E5EB] flex items-center justify-between text-[11px] font-semibold uppercase tracking-wider text-[#716A77]">
+                <span className="flex items-center gap-1.5">
+                  <FileText className="w-3 h-3 text-[#4B2859]" />
+                  Live Transcript
+                </span>
+                <span className="text-[10px] lowercase text-[#716A77]">
+                  {displayMessages.length} turns
+                </span>
+              </div>
+
+              <div
+                ref={transcriptScrollRef}
+                className="p-4 space-y-3 max-h-56 overflow-y-auto text-xs leading-relaxed"
+              >
+                {displayMessages.map((m, idx) => (
+                  <div key={idx} className="space-y-0.5">
+                    <span className={`font-semibold text-[11px] uppercase tracking-wider block ${
+                      m.role === "user" ? "text-blue-600" : "text-[#4B2859]"
+                    }`}>
+                      {m.role === "user" ? "You" : "ARIA"}:
+                    </span>
+                    <p className="text-[#17131A]">{m.content}</p>
+                  </div>
+                ))}
+
+                {/* Live Interim Transcript (as user speaks) */}
+                {interimTranscript && (
+                  <div className="p-2 rounded-xl bg-blue-50/70 border border-blue-200/60 space-y-0.5 animate-pulse">
+                    <span className="font-semibold text-[10px] text-blue-700 uppercase tracking-wider block">
+                      You (speaking…):
+                    </span>
+                    <p className="text-[#17131A] italic">&ldquo;{interimTranscript}&rdquo;</p>
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         )}
       </main>
 
       {/* 3. Call Controls Footer (Only when connected) */}
       {isCallActive && (
-        <footer className="w-full py-6 px-6 bg-white/90 backdrop-blur-md border-t border-[#E9E5EB] flex items-center justify-center gap-6 sticky bottom-0 z-20">
+        <footer className="w-full py-5 px-6 bg-white/90 backdrop-blur-md border-t border-[#E9E5EB] flex items-center justify-center gap-6 sticky bottom-0 z-20">
           {/* Mute Mic */}
           <button
             onClick={() => setIsMuted(!isMuted)}

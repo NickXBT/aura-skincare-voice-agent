@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { LandingHero } from "@/components/landing/LandingHero";
-import { VoiceCallScreen } from "@/components/call/VoiceCallScreen";
+import { VoiceCallScreen, DiagnosticInfo } from "@/components/call/VoiceCallScreen";
 import { ChatScreen } from "@/components/chat/ChatScreen";
 import { TestOrdersModal } from "@/components/assistant/TestOrdersModal";
 import { EvaluatorGuideModal } from "@/components/assistant/EvaluatorGuideModal";
@@ -42,6 +42,8 @@ export default function Home() {
   const [isConnecting, setIsConnecting] = useState<boolean>(false);
   const [permissionError, setPermissionError] = useState<string | null>(null);
   const [micAmplitude, setMicAmplitude] = useState<number>(0);
+  const [liveInterimTranscript, setLiveInterimTranscript] = useState<string>("");
+  const [ttsWarningMessage, setTtsWarningMessage] = useState<string | null>(null);
 
   // Audio / Speech Refs
   const recognizerRef = useRef<VoiceRecognizer | null>(null);
@@ -64,22 +66,29 @@ export default function Home() {
     const synth = new VoiceSynthesizer({
       onStart: () => {
         setAgentState("speaking");
+        setTtsWarningMessage(null);
+        // Ensure recognizer is paused while ARIA speaks
+        recognizerRef.current?.pauseForTTS();
       },
       onEnd: () => {
         // Continuous Conversation: automatically return to Listening
         if (isCallActiveRef.current) {
           setAgentState("listening");
-          try {
-            recognizerRef.current?.start();
-          } catch {}
+          recognizerRef.current?.resumeAfterTTS();
         } else {
           setAgentState("idle");
         }
       },
       onError: (err) => {
-        console.warn("TTS Notice:", err);
+        console.warn("%c[STAGE: ERROR] TTS Playback Notice:", "color: #f59e0b;", err);
+        setTtsWarningMessage(
+          "I'm having trouble playing audio right now, but you can see my response below."
+        );
         if (isCallActiveRef.current) {
           setAgentState("listening");
+          recognizerRef.current?.resumeAfterTTS();
+        } else {
+          setAgentState("idle");
         }
       },
     });
@@ -105,16 +114,20 @@ export default function Home() {
 
       // Barge-in: interrupt ongoing speech immediately
       if (synthesizerRef.current?.speaking) {
+        console.log("[STAGE: TTS_CANCELLED_BY_USER_BARGE_IN]");
         synthesizerRef.current.cancel();
       }
 
       setAgentState("thinking");
+      setLiveInterimTranscript("");
 
       const userMsg: Message = {
         role: "user",
         content: userText.trim(),
         timestamp: Date.now(),
       };
+
+      console.log(`%c[STAGE: AI_REQUEST_STARTED] Query: "${userText.trim()}"`, "color: #3b82f6; font-weight: bold;");
 
       const updatedHistory = [...messagesRef.current, userMsg];
       setMessages(updatedHistory);
@@ -136,17 +149,26 @@ export default function Home() {
         setConversations(loadStoredConversations());
       }
 
+      // 12s timeout controller ensures UI is never stuck indefinitely in "thinking"
+      const abortController = new AbortController();
+      const timeoutId = setTimeout(() => abortController.abort(), 12000);
+
       try {
         const res = await fetch("/api/agent/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ messages: updatedHistory }),
+          signal: abortController.signal,
         });
 
-        if (!res.ok) throw new Error("Server error");
+        clearTimeout(timeoutId);
+
+        if (!res.ok) throw new Error(`HTTP error ${res.status}`);
 
         const data: ChatResponse = await res.json();
         const replyText = data.reply;
+
+        console.log(`%c[STAGE: AI_RESPONSE_RECEIVED] Reply: "${replyText.slice(0, 70)}..."`, "color: #10b981; font-weight: bold;");
 
         if (data.toolCallsExecuted && data.toolCallsExecuted.length > 0) {
           setAccumulatedToolCalls((prev) => [...prev, ...data.toolCallsExecuted]);
@@ -188,13 +210,33 @@ export default function Home() {
 
         // Voice playback if in Voice Call mode or voice turn
         if (synthesizerRef.current && (isCallActiveRef.current || isVoiceTurn)) {
+          recognizerRef.current?.pauseForTTS();
           synthesizerRef.current.speak(replyText);
         } else {
           setAgentState("idle");
         }
-      } catch (err) {
-        console.error("Agent chat error:", err);
-        setAgentState(isCallActiveRef.current ? "listening" : "idle");
+      } catch (err: any) {
+        clearTimeout(timeoutId);
+        console.error("%c[STAGE: ERROR] AI Request Failed:", "color: #ef4444; font-weight: bold;", err);
+
+        const fallbackReply = "Sorry, I couldn't process that right now. Could you try again?";
+        const fallbackMsg: Message = {
+          role: "assistant",
+          content: fallbackReply,
+          timestamp: Date.now(),
+        };
+
+        setMessages((prev) => [...prev, fallbackMsg]);
+
+        if (isCallActiveRef.current && synthesizerRef.current) {
+          recognizerRef.current?.pauseForTTS();
+          synthesizerRef.current.speak(fallbackReply);
+        } else {
+          setAgentState(isCallActiveRef.current ? "listening" : "idle");
+          if (isCallActiveRef.current) {
+            recognizerRef.current?.resumeAfterTTS();
+          }
+        }
       }
     },
     [activeConversationId, conversations, postCallReport]
@@ -215,23 +257,29 @@ export default function Home() {
       onSpeechStart: () => {
         // Real-time interruption / barge-in
         if (synthesizerRef.current?.speaking) {
+          console.log("[STAGE: TTS_CANCELLED_BY_USER_BARGE_IN] User spoke while ARIA was speaking");
           synthesizerRef.current.cancel();
           setAgentState("listening");
         }
       },
       onResult: (transcript, isFinal) => {
-        if (isFinal && transcript.trim()) {
-          handleSendMessage(transcript, true);
+        if (isFinal) {
+          if (transcript.trim()) {
+            setLiveInterimTranscript("");
+            // Immediately pause recognizer while processing query and speaking reply
+            recognizerRef.current?.pauseForTTS();
+            handleSendMessage(transcript.trim(), true);
+          }
+        } else {
+          setLiveInterimTranscript(transcript);
         }
       },
       onError: (err) => {
-        console.warn("Recognizer notice:", err);
+        console.warn("[STAGE: ERROR] Speech recognizer notice:", err);
       },
       onEnd: () => {
-        if (isCallActiveRef.current) {
-          try {
-            recognizerRef.current?.start();
-          } catch {}
+        if (isCallActiveRef.current && !synthesizerRef.current?.speaking) {
+          rec.resumeAfterTTS();
         }
       },
     });
@@ -241,19 +289,25 @@ export default function Home() {
 
   // Start Real Browser Phone Call Flow
   const handleStartCall = async () => {
+    console.log("%c[STAGE: CALL_STARTED] User initiated call", "color: #3b82f6; font-weight: bold;");
     setPermissionError(null);
+    setTtsWarningMessage(null);
     setIsConnecting(true);
 
     try {
       // 1. Request microphone & initialize AudioContext
-      const micStarted = await audioTrackerRef.current?.start();
-      if (!micStarted) {
+      const micRes = await audioTrackerRef.current?.start();
+      if (!micRes?.success) {
         setIsConnecting(false);
+        setAgentState("idle");
         setPermissionError(
-          "Microphone access is needed to talk with ARIA. Please allow microphone permission."
+          micRes?.message ||
+            "Microphone access is needed to talk with ARIA. Please check browser microphone settings."
         );
         return;
       }
+
+      console.log("%c[STAGE: MIC_STREAM_READY] AudioContext and Analyser connected", "color: #10b981; font-weight: bold;");
 
       // 2. Initialize Speech Recognizer
       initializeRecognizer();
@@ -276,22 +330,31 @@ export default function Home() {
         return updated;
       });
 
+      // Pause recognizer before speaking greeting so mic does not pick it up
+      recognizerRef.current?.pauseForTTS();
+      setAgentState("speaking");
+
       if (synthesizerRef.current) {
         synthesizerRef.current.speak(greetingTurn.content);
       } else {
         setAgentState("listening");
+        recognizerRef.current?.resumeAfterTTS();
       }
     } catch (err: any) {
+      console.error("%c[STAGE: ERROR] Could not initialize call:", "color: #ef4444;", err);
       setIsConnecting(false);
+      setAgentState("idle");
       setPermissionError("Could not access microphone: " + (err?.message || "Unknown error"));
     }
   };
 
   // End Call Handler
   const handleEndCall = () => {
+    console.log("%c[STAGE: CALL_ENDED]", "color: #ef4444; font-weight: bold;");
     setIsCallActive(false);
     isCallActiveRef.current = false;
     setAgentState("ended");
+    setLiveInterimTranscript("");
 
     audioTrackerRef.current?.stop();
     setMicAmplitude(0);
@@ -320,6 +383,8 @@ export default function Home() {
     isCallActiveRef.current = false;
     setAgentState("idle");
     setMicAmplitude(0);
+    setLiveInterimTranscript("");
+    setTtsWarningMessage(null);
 
     setMessages([]);
     setAccumulatedToolCalls([]);
@@ -357,6 +422,34 @@ export default function Home() {
     }
   };
 
+  // Diagnostic panel info
+  const diagnosticInfo: DiagnosticInfo = {
+    micStatus: audioTrackerRef.current?.isConnected
+      ? "Connected (Real Stream)"
+      : isCallActive
+      ? "Connected"
+      : "Disconnected",
+    permissionStatus: permissionError
+      ? "Denied / Error"
+      : isCallActive
+      ? "Granted"
+      : "Not requested",
+    sttStatus: recognizerRef.current?.active
+      ? "Active (en-IN)"
+      : recognizerRef.current?.pausedForTTS
+      ? "Paused (Speaking)"
+      : isCallActive
+      ? "Ready"
+      : "Idle",
+    ttsStatus: synthesizerRef.current?.speaking
+      ? "Speaking"
+      : synthesizerRef.current
+      ? `Available (${synthesizerRef.current.getSelectedVoiceName()})`
+      : "Unavailable",
+    aiStatus: agentState === "thinking" ? "Processing Query" : "Connected",
+    currentState: agentState,
+  };
+
   return (
     <>
       {currentMode === "landing" ? (
@@ -383,6 +476,9 @@ export default function Home() {
             handleNewConversation();
             handleStartCall();
           }}
+          interimTranscript={liveInterimTranscript}
+          diagnosticInfo={diagnosticInfo}
+          ttsWarningMessage={ttsWarningMessage}
         />
       ) : (
         <ChatScreen
